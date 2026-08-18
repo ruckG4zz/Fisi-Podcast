@@ -393,8 +393,52 @@ const Speech = (() => {
   function pause() {
     if (player && !player.paused) { try { player.pause(); } catch (_) {} }
   }
-  function resume() {
-    if (player && player.paused && player.src) { player.play().catch(() => {}); }
+
+  /* ---------------------------------------------------------------------
+     FORTSETZEN — gibt jetzt zurueck, OB es tatsaechlich geklappt hat.
+     ---------------------------------------------------------------------
+     BEFUND VOM HANDY-TEST (18.08.2026, ruckG4zz): ueber die Steuerung auf
+     dem Sperrbildschirm laesst sich pausieren, aber nicht wieder starten —
+     dafuer muss der Bildschirm erst entsperrt werden.
+
+     Die Ursache steckt in der Asymmetrie der beiden Aufrufe:
+       pause()  ist synchron und gelingt praktisch immer.
+       play()   gibt ein Promise zurueck, das Android ablehnen kann, wenn
+                die Seite im Hintergrund liegt.
+
+     Bisher stand hier `player.play().catch(() => {})` — der Fehler wurde
+     also komplett verschluckt. Es gab nicht einmal eine Spur davon, weder
+     im Verlauf noch in der Diagnose. Der Knopf war einfach tot.
+
+     Jetzt wird das Ergebnis nach oben gereicht, damit app.js einen
+     Notfallplan fahren kann (Abschnitt neu anwerfen statt gar nichts).
+     --------------------------------------------------------------------- */
+  let letzterWiedergabeFehler = null;
+
+  async function resume() {
+    if (!player || !player.src) return false;
+    if (!player.paused) return true;          // laeuft ohnehin schon
+    try {
+      await player.play();
+      letzterWiedergabeFehler = null;
+      return true;
+    } catch (e) {
+      letzterWiedergabeFehler = (e && e.message) || 'play() wurde abgelehnt';
+      return false;
+    }
+  }
+
+  function letzterPlayFehler() { return letzterWiedergabeFehler; }
+
+  /* Aktuelle Position innerhalb des laufenden Segments.
+     Basis fuer die Zeit-/Laufbalkenanzeige in app.js: ohne den Anteil im
+     laufenden Segment wuerde der Balken nur alle paar Sekunden ruckartig
+     weiterspringen statt gleichmaessig zu laufen. */
+  function position() {
+    if (!player || !player.src) return { zeit: 0, dauer: 0, anteil: 0 };
+    const d = isFinite(player.duration) && player.duration > 0 ? player.duration : 0;
+    const t = player.currentTime || 0;
+    return { zeit: t, dauer: d, anteil: d > 0 ? Math.min(1, t / d) : 0 };
   }
   function isPaused()   { return !!(player && player.paused && player.src && !player.ended); }
   function isSpeaking() { return !!(player && player.src && !player.paused && !player.ended); }
@@ -581,6 +625,7 @@ const Speech = (() => {
 
   return {
     init, speak, prefetch, stop, stopSofort, pause, resume, isPaused, isSpeaking,
+    position, letzterPlayFehler,
     listen, cancelListen, sttSupported, ttsSupported, voiceInfo,
     micPermission, requestMic, isMobile: () => IS_MOBILE,
     setCloudConfig, getCloudConfig, cloudAktiv, letzterFehler,

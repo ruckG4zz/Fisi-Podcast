@@ -40,6 +40,24 @@ const App = (() => {
 
   const LAYER_KEY = 'fisi-podcast-schicht';
 
+  /* ---------------------------------------------------------------------
+     ZEITSCHÄTZUNG
+     ---------------------------------------------------------------------
+     Die echte Audiodauer ist im Voraus NICHT bekannt: jedes Segment wird
+     erst beim ersten Hoeren synthetisiert. Ein ehrlicher Laufbalken ueber
+     die Gesamtlaenge braucht also eine Schaetzung.
+
+     Grundlage ist die Zeichenzahl. 900 Zeichen pro Minute ist der
+     Richtwert, mit dem auch die Testsuite seit dem Layer-1-Pilot rechnet —
+     er passt zu einer ruhig gesprochenen deutschen Stimme.
+
+     Wichtig zur Einordnung: die Anzeige ist damit eine SCHAETZUNG, keine
+     Messung. Innerhalb des laufenden Segments wird sie mit der echten
+     Position des Audio-Elements verfeinert, damit der Balken gleichmaessig
+     laeuft statt zu springen. In der Oberflaeche steht das auch so dran.
+     --------------------------------------------------------------------- */
+  const ZEICHEN_PRO_MINUTE = 900;
+
   const state = {
     layer: 0,         // Index in LAYERS
     chapter: 0,
@@ -49,7 +67,8 @@ const App = (() => {
     busy: false,      // Frage/Antwort läuft, Player pausiert
     gen: 0,           // Generation-Token: bricht alte Play-Schleifen ab
     voiceInfo: null,
-    lastQuestion: null
+    lastQuestion: null,
+    sitzung: null     // laufende Hör-Sitzung (für die Abschluss-Zusammenfassung)
   };
 
   /* Kurzzugriffe auf die laufende Schicht. Bewusst Funktionen und keine
@@ -58,6 +77,59 @@ const App = (() => {
   function schicht() { return LAYERS[state.layer]; }
   function P()       { return schicht().podcast; }
   function R()       { return schicht().register; }
+
+  /* =====================================================================
+     ZEIT-INDEX
+     ---------------------------------------------------------------------
+     Fuer jede Schicht wird EINMAL beim Start ausgerechnet, wie viele
+     Zeichen vor jedem einzelnen Segment liegen. Damit laesst sich jede
+     Position in Sekunden umrechnen, ohne bei jedem Bildaufbau ueber alle
+     hundert Kapitel zu laufen.
+     ===================================================================== */
+  LAYERS.forEach(l => {
+    const kapitel = [];
+    let summe = 0;
+    l.podcast.chapters.forEach(ch => {
+      const vor = [];
+      ch.segments.forEach(s => { vor.push(summe); summe += s.text.length; });
+      kapitel.push(vor);
+    });
+    l.zeit = { kapitel, gesamt: summe };
+  });
+
+  const GESAMT_ZEICHEN = LAYERS.reduce((n, l) => n + l.zeit.gesamt, 0);
+
+  function sekundenAusZeichen(z) { return (z / ZEICHEN_PRO_MINUTE) * 60; }
+
+  /* mm:ss unter einer Stunde, h:mm:ss darüber */
+  function zeitText(sekunden) {
+    const s = Math.max(0, Math.round(sekunden));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const rest = s % 60;
+    const zwei = n => String(n).padStart(2, '0');
+    return h > 0 ? `${h}:${zwei(m)}:${zwei(rest)}` : `${m}:${zwei(rest)}`;
+  }
+
+  /* Zeichen, die in der laufenden Schicht bereits hinter uns liegen —
+     inklusive des angebrochenen Segments, damit der Balken gleichmaessig
+     laeuft und nicht im Sekundentakt springt. */
+  function zeichenBisHier() {
+    const z = schicht().zeit;
+    const vorher = (z.kapitel[state.chapter] || [])[state.segment];
+    if (vorher == null) return 0;
+    const seg = P().chapters[state.chapter].segments[state.segment];
+    let anteil = 0;
+    try { anteil = Speech.position().anteil || 0; } catch (_) {}
+    return vorher + (seg ? seg.text.length * anteil : 0);
+  }
+
+  /* Dasselbe ueber alle Schichten hinweg — fuer die Gesamtanzeige. */
+  function zeichenGesamtBisHier() {
+    let summe = 0;
+    for (let i = 0; i < state.layer; i++) summe += LAYERS[i].zeit.gesamt;
+    return summe + zeichenBisHier();
+  }
 
   const el = {};      // DOM-Referenzen
 
@@ -183,12 +255,64 @@ const App = (() => {
     const ch = P().chapters[state.chapter];
     const total = ch.segments.length;
     el.nowChapter.textContent = `${state.chapter + 1}. ${ch.titel}`;
-    el.nowProgress.textContent = `Abschnitt ${state.segment + 1} von ${total} · ${schicht().knopf}`;
-    const pct = ((state.chapter + (state.segment / total)) / P().chapters.length) * 100;
-    el.bar.style.width = pct.toFixed(1) + '%';
+    el.nowProgress.textContent =
+      `Kapitel ${state.chapter + 1} von ${P().chapters.length} · Abschnitt ${state.segment + 1} von ${total}`;
+    renderZeit();
     // aktives Kapitel markieren
     [...el.chapters.children].forEach((c, i) => c.classList.toggle('active', i === state.chapter));
   }
+
+  /* ---------------------------------------------------------------------
+     LAUFBALKEN UND ZEITANZEIGE (Wunsch ruckG4zz, 18.08.2026)
+     ---------------------------------------------------------------------
+     Vorher zeigte der Balken nur den Kapitelanteil — man sah also nicht,
+     wo man in der Gesamtaufnahme steht. Jetzt laeuft er ueber die
+     geschaetzte Spielzeit und darunter steht beides im Klartext:
+     Position in der laufenden Schicht UND ueber alle drei zusammen.
+
+     Zusaetzlich wird die Position an die Mediensitzung gemeldet. Damit
+     bekommt auch der Sperrbildschirm einen echten Fortschrittsbalken,
+     statt nur Titel und Knoepfe zu zeigen.
+     --------------------------------------------------------------------- */
+  function renderZeit() {
+    if (!el.bar) return;
+
+    const inSchicht   = zeichenBisHier();
+    const schichtGes  = schicht().zeit.gesamt;
+    const gesamt      = zeichenGesamtBisHier();
+
+    const anteil = schichtGes > 0 ? (inSchicht / schichtGes) * 100 : 0;
+    el.bar.style.width = Math.min(100, Math.max(0, anteil)).toFixed(2) + '%';
+
+    if (el.zeit) {
+      el.zeit.innerHTML =
+        `<span><b>${zeitText(sekundenAusZeichen(inSchicht))}</b> von ` +
+        `${zeitText(sekundenAusZeichen(schichtGes))} · ${schicht().knopf}</span>` +
+        `<span class="zeit-ges">gesamt ${zeitText(sekundenAusZeichen(gesamt))} von ` +
+        `${zeitText(sekundenAusZeichen(GESAMT_ZEICHEN))}</span>`;
+    }
+
+    /* Fortschrittsbalken auf dem Sperrbildschirm. In einen try/catch, weil
+       Android bei ungueltigen Werten (Position groesser als Dauer) hart
+       wirft — das darf die Wiedergabe nicht mitreissen. */
+    if ('mediaSession' in navigator && navigator.mediaSession.setPositionState) {
+      try {
+        const dauer = sekundenAusZeichen(schichtGes);
+        navigator.mediaSession.setPositionState({
+          duration: dauer,
+          position: Math.min(sekundenAusZeichen(inSchicht), dauer),
+          playbackRate: 1
+        });
+      } catch (_) {}
+    }
+  }
+
+  /* Waehrend der Wiedergabe laeuft die Anzeige mit. Ein Segment dauert
+     mehrere Sekunden — ohne Ticker stuende der Balken die ganze Zeit still
+     und sprae dann. */
+  let tickerId = null;
+  function tickerStart() { if (!tickerId) tickerId = setInterval(renderZeit, 1000); }
+  function tickerStop()  { if (tickerId) { clearInterval(tickerId); tickerId = null; } }
 
   function setPlayUI(playing) {
     el.play.textContent = playing ? '⏸  Pause' : '▶  Abspielen';
@@ -273,6 +397,8 @@ const App = (() => {
     state.playing = true;
     setPlayUI(true);
     silentKeepAlive(true);
+    tickerStart();
+    sitzungStarten();
 
     while (state.playing && state.gen === myGen) {
       const ch = P().chapters[state.chapter];
@@ -326,10 +452,17 @@ const App = (() => {
 
       if (res && res.stopped) { return; }
 
+      /* Erst JETZT gilt der Abschnitt als tatsaechlich gehoert. Grundlage
+         fuer die Sitzungs-Zusammenfassung am Ende: gezaehlt wird nur, was
+         auch wirklich durchgelaufen ist — nicht, worueber man hinweg
+         gesprungen ist. */
+      sitzungZaehlen(jetzt.text.length);
+
       state.segment++;
       save();
     }
     silentKeepAlive(false);
+    tickerStop();
   }
 
   /* Sichtbare, unuebersehbare Meldung wenn die Sprachausgabe nicht kann. */
@@ -382,15 +515,47 @@ const App = (() => {
     state.paused  = true;
     Speech.pause();
     setPlayUI(false);
+    tickerStop();
+    renderZeit();          // Standlinie einmal sauber nachziehen
     log('Pausiert.', 'sys');
   }
 
-  function resumePlay() {
+  /* ===== BEHOBEN: PLAY AUF DEM SPERRBILDSCHIRM TAT NICHTS (18.08.2026) =====
+
+     Von ruckG4zz gemeldet: ueber die Steuerung im gesperrten Zustand liess
+     sich anhalten, aber nicht wieder starten — dafuer musste der Bildschirm
+     erst entsperrt werden.
+
+     Ursache: `player.play()` gibt ein Promise zurueck, das Android ablehnt,
+     wenn die Seite im Hintergrund liegt. In speech.js wurde dieser Fehler
+     bis eben komplett verschluckt. Nach aussen sah es aus, als sei der
+     Knopf tot — es gab weder Ton noch Meldung.
+
+     Jetzt meldet Speech.resume() ehrlich zurueck, ob es geklappt hat. Und
+     wenn nicht, wird der laufende Abschnitt von vorn angeworfen, statt
+     tatenlos zu bleiben: ein Satz doppelt zu hoeren ist deutlich besser
+     als ein Knopf, der nicht reagiert. */
+  async function resumePlay() {
     state.paused  = false;
     state.playing = true;
     setPlayUI(true);
     silentKeepAlive(true);
-    Speech.resume();
+    tickerStart();
+
+    const ok = await Speech.resume();
+    if (ok) return true;
+
+    log('Fortsetzen wurde vom Browser abgelehnt (' +
+        (Speech.letzterPlayFehler() || 'ohne Angabe') +
+        '). Der Abschnitt wird neu gestartet.', 'sys');
+
+    /* Die alte Schleife haengt noch im await einer Wiedergabe, die nie
+       endet (pausiertes Audio feuert kein 'ended'). Speech.stop() loest
+       sie auf, danach faengt playLoop() denselben Abschnitt neu an. */
+    Speech.stop();
+    state.playing = false;
+    playLoop();
+    return false;
   }
 
   /* Harter Stopp: beendet die Schleife wirklich. Fuer Sprung, Zwischenfrage
@@ -402,12 +567,40 @@ const App = (() => {
     Speech.stop();
     setPlayUI(false);
     silentKeepAlive(false);
+    tickerStop();
   }
 
   function togglePlay() {
     if (state.playing)     { pausePlay(); }
     else if (state.paused) { resumePlay(); }
     else                   { startPlay(); }
+  }
+
+  /* ---------------------------------------------------------------------
+     PLAY VON DER MEDIENSTEUERUNG (Sperrbildschirm / Kopfhoerertaste)
+     ---------------------------------------------------------------------
+     Braucht mehr Vorsicht als der Knopf in der App, weil der Zustand hier
+     auseinanderlaufen kann: raeumt Android die Wiedergabe im Hintergrund
+     ab, steht state.playing weiterhin auf true — der Ton ist aber weg.
+     startPlay() wuerde in diesem Fall sofort wieder aussteigen ("laeuft ja
+     schon") und der Knopf bliebe wirkungslos. Genau dieses Bild hat
+     ruckG4zz beschrieben.
+
+     Deshalb wird hier zusaetzlich geprueft, ob tatsaechlich Ton laeuft,
+     und im Zweifel neu angeworfen.
+     --------------------------------------------------------------------- */
+  function medienPlay() {
+    if (state.busy) return;
+    if (state.paused) { resumePlay(); return; }
+
+    if (state.playing && !Speech.isSpeaking()) {
+      log('Die Wiedergabe stand still, obwohl sie laufen sollte — wird neu gestartet.', 'sys');
+      Speech.stop();
+      state.playing = false;
+      playLoop();
+      return;
+    }
+    startPlay();
   }
 
   function jumpTo(chapterIdx, segIdx = 0, announce = false) {
@@ -419,6 +612,132 @@ const App = (() => {
     const ch = P().chapters[state.chapter];
     if (announce) log('Sprung zu: ' + ch.titel, 'sys');
     if (wasPlaying || announce) startPlay();
+  }
+
+  /* =====================================================================
+     HÖR-SITZUNG UND ABSCHLUSS-ZUSAMMENFASSUNG
+     ---------------------------------------------------------------------
+     Aus dem Ursprungskonzept vom 31.07.2026 ("Am Ende einer Session:
+     Zusammenfassungsblock"), damals bewusst nicht Teil des Piloten,
+     nachgetragen am 18.08.2026.
+
+     ABGRENZUNG zum Kapitel "Zusammenfassung Layer X": Das ist ein fester
+     Merkblock zum kompletten Themengebiet einer Schicht. Was hier
+     entsteht, ist etwas anderes — ein Bericht ueber genau DIESE Sitzung:
+     wie lange, welche Kapitel, wo es weitergeht. Deshalb dynamisch
+     zusammengesetzt statt im Skript hinterlegt.
+
+     WICHTIG zur Inhaltsregel: es wird kein Fachinhalt erfunden. Genannt
+     werden ausschliesslich Kapiteltitel und deren Kurzbeschreibungen, wie
+     sie in den content-Dateien stehen, plus reine Navigationsangaben.
+     ===================================================================== */
+  function sitzungStarten() {
+    if (state.sitzung) return;
+    state.sitzung = {
+      beginn:  Date.now(),
+      gehoert: 0,          // tatsaechlich durchgelaufene Zeichen
+      kapitel: []          // "layerIdx:chapterIdx", in Hoerreihenfolge
+    };
+  }
+
+  function sitzungZaehlen(zeichen) {
+    if (!state.sitzung) return;
+    state.sitzung.gehoert += zeichen;
+    const marke = state.layer + ':' + state.chapter;
+    if (state.sitzung.kapitel[state.sitzung.kapitel.length - 1] !== marke) {
+      /* Nur aufnehmen, wenn es nicht schon direkt davor stand — bei einem
+         Ruecksprung soll ein Kapitel aber durchaus zweimal auftauchen
+         duerfen, deshalb kein globales Set. Beim Vorlesen wird spaeter
+         entdoppelt. */
+      state.sitzung.kapitel.push(marke);
+    }
+  }
+
+  /* Baut den gesprochenen Bericht. Gibt null zurueck, wenn in dieser
+     Sitzung nichts gehoert wurde — dann gibt es auch nichts zu berichten. */
+  function sitzungBericht() {
+    const s = state.sitzung;
+    if (!s || !s.gehoert) return null;
+
+    const minuten = Math.max(1, Math.round(sekundenAusZeichen(s.gehoert) / 60));
+
+    /* Reihenfolge erhalten, Doppelnennungen raus */
+    const gesehen = new Set();
+    const kapitel = [];
+    s.kapitel.forEach(m => {
+      if (gesehen.has(m)) return;
+      gesehen.add(m);
+      const [li, ci] = m.split(':').map(Number);
+      const l = LAYERS[li];
+      if (l && l.podcast.chapters[ci]) kapitel.push({ layer: l, ch: l.podcast.chapters[ci] });
+    });
+    if (!kapitel.length) return null;
+
+    /* Schichten, die berührt wurden — für den Einleitungssatz */
+    const schichten = [...new Set(kapitel.map(k => k.layer.gesprochen))];
+
+    const teile = [];
+    teile.push({ voice: 'b', text:
+      `Kurzer Rückblick auf diese Sitzung. Du hast rund ${minuten} ${minuten === 1 ? 'Minute' : 'Minuten'} gehört, ` +
+      `und zwar in ${schichten.length === 1 ? schichten[0] : schichten.join(' und ')}.` });
+
+    teile.push({ voice: 'a', text:
+      `Durch waren dabei ${kapitel.length} ${kapitel.length === 1 ? 'Kapitel' : 'Kapitel'}.` });
+
+    /* Die Kapitel einzeln, mit ihrer Kurzbeschreibung aus dem Skript.
+       Bei sehr vielen Kapiteln bewusst gekuerzt — eine Aufzaehlung von
+       zwanzig Titeln hoert sich niemand bis zum Ende an. */
+    const nennen = kapitel.slice(0, 8);
+    nennen.forEach((k, i) => {
+      teile.push({
+        voice: i % 2 === 0 ? 'b' : 'a',
+        text: `${k.ch.titel}. Da ging es um ${k.ch.kurz}.`
+      });
+    });
+    if (kapitel.length > nennen.length) {
+      teile.push({ voice: 'a', text:
+        `Und ${kapitel.length - nennen.length} weitere, die ich nicht alle aufzähle.` });
+    }
+
+    const ch = P().chapters[state.chapter];
+    teile.push({ voice: 'b', text:
+      `Beim nächsten Mal geht es weiter bei ${ch.titel}, in ${schicht().gesprochen}. Bis dahin.` });
+
+    return { minuten, kapitel, teile };
+  }
+
+  /* Zeigt die Beenden-Abfrage. Bewusst eine Karte in der App und kein
+     Browser-Dialog: nur so lassen sich drei echte Wahlmöglichkeiten
+     anbieten statt nur OK und Abbrechen. */
+  function beendenAnbieten() {
+    if (state.playing) pausePlay();
+    const b = sitzungBericht();
+    if (!el.endBox) return;
+    el.endBox.hidden = false;
+    el.endText.textContent = b
+      ? `Du hast in dieser Sitzung rund ${b.minuten} ${b.minuten === 1 ? 'Minute' : 'Minuten'} gehört, ` +
+        `verteilt auf ${b.kapitel.length} ${b.kapitel.length === 1 ? 'Kapitel' : 'Kapitel'}. ` +
+        `Soll ich kurz zusammenfassen, was das war?`
+      : 'In dieser Sitzung wurde noch nichts gehört — es gibt also nichts zusammenzufassen.';
+    if (el.endSummary) el.endSummary.disabled = !b;
+    try { el.endBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+  }
+
+  /* Spricht den Bericht und beendet danach die Sitzung. */
+  async function sitzungAbschliessen() {
+    const bericht = sitzungBericht();
+    stopPlay();
+    if (!bericht) {
+      log('In dieser Sitzung wurde noch nichts gehört — es gibt nichts zusammenzufassen.', 'sys');
+      state.sitzung = null;
+      return;
+    }
+    for (const t of bericht.teile) {
+      log(t.text, 'recap');
+      const res = await Speech.speak(t.text, { voice: t.voice });
+      if (res && res.stopped) break;   // abgebrochen, z.B. weil doch weitergehört wird
+    }
+    state.sitzung = null;
   }
 
   /* "Fass mal zusammen" — springt ins Zusammenfassungs-Kapitel der
@@ -708,6 +1027,7 @@ const App = (() => {
           case 'pause':    log('Pausiert.', 'sys'); return;
           case 'resume':   startPlay(); return;
           case 'summary':  zurZusammenfassung(); return;
+          case 'ende':     await sitzungAbschliessen(); return;
           case 'recap':    await speakRecap('manuell'); if (wasPlaying) startPlay(); return;
           case 'overview': await speakOverview();      if (wasPlaying) startPlay(); return;
         }
@@ -1119,7 +1439,7 @@ const App = (() => {
     try {
       /* Sperrbildschirm: Pause muss hier ebenfalls eine ECHTE Pause sein,
          sonst springt der Abschnitt beim Fortsetzen an den Anfang zurueck. */
-      h('play',          () => startPlay());
+      h('play',          () => medienPlay());
       h('pause',         () => pausePlay());
       h('nexttrack',     () => nextChapter());
       h('previoustrack', () => prevChapter());
@@ -1132,8 +1452,9 @@ const App = (() => {
      ===================================================================== */
   async function init() {
     // DOM einsammeln
-    ['play','mic','ask','qtext','chapters','layers','log','bar','nowChapter','nowProgress',
+    ['play','mic','ask','qtext','chapters','layers','log','bar','zeit','nowChapter','nowProgress',
      'transcript','speaker','source','diag','reset','next','prev',
+     'endSession','endBox','endText','endSummary','endClose','endBack',
      'micbox','micStatus','micHeardText',
      'keyWarn','apiKey','apiSave','apiShow','apiTest',
      'apiClear','apiStatus','voiceA','voiceB','voiceLoad','voiceProbe',
@@ -1192,6 +1513,45 @@ const App = (() => {
     el.ask.onclick   = askByText;
     el.reset.onclick = resetProgress;
     el.qtext.addEventListener('keydown', e => { if (e.key === 'Enter') askByText(); });
+
+    /* --- Sitzung beenden --- */
+    if (el.endSession) el.endSession.onclick = beendenAnbieten;
+    if (el.endSummary) el.endSummary.onclick = async () => {
+      el.endBox.hidden = true;
+      await sitzungAbschliessen();
+    };
+    if (el.endClose) el.endClose.onclick = () => {
+      el.endBox.hidden = true;
+      stopPlay();
+      state.sitzung = null;
+      log('Sitzung beendet. Der Hörstand ist gespeichert.', 'sys');
+    };
+    if (el.endBack) el.endBack.onclick = () => {
+      el.endBox.hidden = true;
+      startPlay();
+    };
+
+    /* ---------------------------------------------------------------------
+       WARNUNG BEIM SCHLIESSEN — mit ehrlicher Einschraenkung.
+       ---------------------------------------------------------------------
+       Wunsch von ruckG4zz: beim Beenden der App soll gefragt werden, ob er
+       schliessen will und die Zusammenfassung noch hoeren moechte.
+
+       Was technisch geht: der Browser zeigt seinen EIGENEN, generischen
+       Dialog ("Seite verlassen?"). Ein eigener Text ist darin seit Jahren
+       nicht mehr erlaubt, und drei Wahlmoeglichkeiten schon gar nicht.
+
+       Was NICHT geht: das Wegwischen der installierten App aus der
+       Aufgabenuebersicht abfangen. Android beendet sie dann ohne jede
+       Vorwarnung an die Seite. Genau dafuer gibt es den Beenden-Knopf und
+       den Sprachbefehl — das ist der zuverlaessige Weg, dieser hier ist
+       nur das Netz darunter.
+       --------------------------------------------------------------------- */
+    window.addEventListener('beforeunload', (e) => {
+      if (!state.sitzung || !state.sitzung.gehoert) return;
+      e.preventDefault();
+      e.returnValue = '';
+    });
 
     /* --- Stimmen-Einstellungen ---
        Es gibt keine Provider-Umschaltung mehr. Google Cloud ist die einzige

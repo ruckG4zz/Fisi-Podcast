@@ -59,9 +59,15 @@ h1{font-size:1.35rem;margin:0 0 4px;letter-spacing:-.01em}
 /* --- Jetzt läuft --- */
 .now-chapter{font-size:1.05rem;font-weight:600;margin-bottom:2px}
 .now-progress{color:var(--fg-dim);font-size:.82rem}
-.barwrap{height:5px;background:var(--bg3);border-radius:99px;overflow:hidden;margin:12px 0 14px}
+.barwrap{height:5px;background:var(--bg3);border-radius:99px;overflow:hidden;margin:12px 0 7px}
 .bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent-dim),var(--accent));
-  border-radius:99px;transition:width .35s ease}
+  border-radius:99px;transition:width .9s linear}
+.zeit{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  font-size:.78rem;color:var(--fg-dim);margin-bottom:12px;
+  font-variant-numeric:tabular-nums}
+.zeit b{color:var(--fg);font-weight:600}
+.zeit-ges{opacity:.75}
+.zeit-hint{font-size:.72rem;color:var(--fg-dim);opacity:.65;margin:-8px 0 12px}
 .speaker{display:inline-block;font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;
   padding:2px 9px;border-radius:99px;margin-bottom:8px;border:1px solid currentColor}
 .speaker-a{color:var(--voice-a)}
@@ -158,6 +164,14 @@ select:focus{outline:none;border-color:var(--accent-dim)}
 .resume p{margin:0 0 12px;font-size:.92rem}
 .resume .controls{margin-top:0}
 
+/* --- Sitzung beenden --- */
+.endbox{background:linear-gradient(180deg,var(--bg3),var(--bg2));
+  border:1px solid var(--warn);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+.endbox h2{color:var(--warn)}
+.endbox p{margin:0 0 12px;font-size:.92rem}
+.endbox .controls{margin-top:0}
+.endbox .src-note{margin-top:12px}
+
 /* --- Schicht-Umschalter --- */
 .layers{display:flex;gap:8px;flex-wrap:wrap}
 .layer{flex:1;min-width:96px;display:flex;flex-direction:column;align-items:flex-start;
@@ -244,18 +258,38 @@ footer a{color:var(--accent-dim)}
     </div>
   </div>
 
+  <!-- Sitzung beenden -->
+  <div class="endbox" id="endBox" hidden>
+    <h2 style="margin-top:0">Für heute beenden?</h2>
+    <p id="endText"></p>
+    <div class="controls">
+      <button class="primary" id="endSummary">Zusammenfassung hören</button>
+      <button id="endClose">Ohne Zusammenfassung beenden</button>
+      <button id="endBack">Doch weiterhören</button>
+    </div>
+    <div class="src-note">
+      Der Hörstand wird in jedem Fall gespeichert — auch wenn du die App
+      einfach wegwischst. Diese Abfrage kann technisch <strong>nicht</strong>
+      erzwungen werden: Android beendet eine weggewischte App ohne
+      Vorwarnung. Deshalb ist dieser Knopf der zuverlässige Weg.
+    </div>
+  </div>
+
   <!-- Player -->
   <div class="card">
     <h2>Jetzt läuft</h2>
     <div class="now-chapter" id="nowChapter">—</div>
     <div class="now-progress" id="nowProgress">—</div>
     <div class="barwrap"><div class="bar" id="bar"></div></div>
+    <div class="zeit" id="zeit"></div>
+    <div class="zeit-hint">Spielzeit geschätzt aus der Textlänge (rund 900 Zeichen je Minute) — die echte Dauer steht erst fest, wenn ein Abschnitt gesprochen wurde.</div>
     <span class="speaker speaker-a" id="speaker">Stimme A</span>
     <div class="transcript" id="transcript">Drück auf Abspielen, um zu starten.</div>
     <div class="controls">
       <button class="primary" id="play">▶&nbsp; Abspielen</button>
       <button id="prev">⏮&nbsp; Kapitel</button>
       <button id="next">⏭&nbsp; Kapitel</button>
+      <button id="endSession">⏹&nbsp; Für heute beenden</button>
     </div>
   </div>
 
@@ -284,7 +318,7 @@ footer a{color:var(--accent-dim)}
       Befehle: <code>spring zu …</code> (Kapitelname der laufenden Schicht) ·
       <code>weiter</code> · <code>zurück</code> ·
       <code>nochmal</code> · <code>von vorn</code> · <code>fass zusammen</code> ·
-      <code>wo bin ich</code> · <code>Übersicht</code>
+      <code>wo bin ich</code> · <code>Übersicht</code> · <code>ich bin fertig</code>
     </div>
     <div class="source" id="source" hidden></div>
   </div>

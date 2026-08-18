@@ -94,6 +94,17 @@ const Matcher = (() => {
         /\bfass(e|t)?\b.{0,25}\bzusammen\b/,
         /\b(kurzuebersicht|das wichtigste|wichtigste nochmal|merkblock)\b/
       ] },
+    /* SITZUNG BEENDEN — spricht die Abschluss-Zusammenfassung.
+       -------------------------------------------------------------------
+       Bewusst nur eindeutige Abschieds-Formulierungen und keine losen
+       Einzelwoerter: "ende" und "fertig" stecken in zu vielen normalen
+       Saetzen ("wo eine Nachricht anfaengt und wo sie endet", "fertig
+       konfiguriert"). Deshalb wird hier immer eine ganze Wendung
+       verlangt. */
+    { cmd: 'ende',     res: [
+        /\b(ich bin fertig|bin fertig fuer heute|fertig fuer heute|das reicht fuer heute|fuer heute reicht|schluss fuer heute|genug fuer heute)\b/,
+        /\b(sitzung beenden|beende die sitzung|hoeren beenden|ich hoere auf|wir hoeren auf|mach schluss|feierabend)\b/
+      ] },
     { cmd: 'recap',    res: [/\b(wo (bin|sind|waren) (ich|wir)|recap|worueber reden wir|wo waren wir)\b/] },
     { cmd: 'overview', res: [/\b(inhaltsverzeichnis|uebersicht|welche kapitel|was kommt noch|kapitelliste)\b/] }
   ];
