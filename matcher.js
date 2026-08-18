@@ -46,6 +46,25 @@ const Matcher = (() => {
     { cmd: 'jump',     res: [/\b(spring|springe|springen|geh|gehe|wechsel|wechsle|zeig|zeige)\b\s+/] },
     { cmd: 'next',     res: [/\b(naechstes?|naechsten)\s+(kapitel|abschnitt|thema)\b/, /^\s*(naechstes?|vorwaerts|ueberspringen)\s*$/] },
     { cmd: 'prev',     res: [/\b(vorheriges?|letztes?|vorherigen)\s+(kapitel|abschnitt|thema)\b/, /^\s*(zurueck|rueckwaerts)\s*$/] },
+    /* NEUANFANG DES KAPITELS — muss VOR 'repeat' stehen.
+       -------------------------------------------------------------------
+       Hintergrund: Die Pausentaste setzt seit 18.08.2026 dort fort, wo
+       tatsaechlich aufgehoert wurde, statt den Abschnitt neu zu beginnen.
+       Wer den Faden verloren hat, braucht dafuer einen eigenen Weg zurueck
+       an den Kapitelanfang — genau das ist dieser Befehl.
+
+       Warum die Reihenfolge zaehlt: "kannst du nochmal von vorne beginnen"
+       enthaelt "nochmal" und wuerde sonst vom Wiederhol-Befehl darunter
+       geschluckt, der nur den einen unterbrochenen Abschnitt wiederholt.
+       Wer "von vorne" sagt, meint aber das ganze Kapitel.
+
+       Bewusst NICHT weich (kein soft): "den Faden verloren" ist eindeutig,
+       da steckt keine versteckte Fachfrage drin. */
+    { cmd: 'restart',  res: [
+        /\b(von vorn|von vorne|nochmal von vorn|neu beginnen|neu anfangen|von anfang|am anfang anfangen)\b/,
+        /\b(faden verloren|verloren den faden|nicht mehr mitgekommen|nicht mehr hinterher|abgehaengt|komplett raus)\b/,
+        /\b(kapitel|abschnitt|thema)\s+(nochmal|neu|von vorn|von vorne)\b/
+      ] },
     /* WEICH: "nochmal" ist meistens nur ein Fuellwort in einer echten Frage
        ("erklaer mir das nochmal mit CAN"). Deshalb greift dieser Befehl erst,
        wenn im Satz KEIN Fachbegriff steckt — sonst gewinnt die Antwort. */

@@ -13,6 +13,7 @@ const App = (() => {
     chapter: 0,
     segment: 0,
     playing: false,
+    paused: false,    // echte Pause: Schleife lebt, Audio steht nur still
     busy: false,      // Frage/Antwort läuft, Player pausiert
     gen: 0,           // Generation-Token: bricht alte Play-Schleifen ab
     voiceInfo: null,
@@ -122,12 +123,29 @@ const App = (() => {
         dem Geraetespeicher. Belastet das Monatskontingent also nur beim
         allerersten Durchlauf, danach null.
      --------------------------------------------------------------------- */
+  /* Wörter, mit denen eine Replik von sich aus schon zustimmend beginnt.
+     BEHOBENER FEHLER (18.08.2026): Vorher wurde nicht geprueft, womit das
+     Segment selbst anfaengt. Bei "Genau, der kommt naemlich..." setzte sich
+     dann ein "Stimmt." davor — zwei Bestaetigungen hintereinander, die sich
+     gegenseitig entwerten und zusammenhangslos klingen. Genau der von
+     ruckG4zz gemeldete Fall. */
+  const EIGENE_ZUSTIMMUNG = /^\s*(genau|stimmt|richtig|klar|gut|ja|okay|ok|mhm|aha|verstehe|korrekt|exakt|sehr gut|so ist es|absolut|eben)\b/i;
+
   function reaktionFuer(chIdx, segIdx, seg, vorheriges) {
     if (!vorheriges || vorheriges.voice === seg.voice) return '';
     const liste = (MOD.reaktionen && MOD.reaktionen.length) ? MOD.reaktionen : null;
     if (!liste) return '';
+
+    /* Faengt die Replik selbst schon bestaetigend an, bleibt sie unangetastet. */
+    if (EIGENE_ZUSTIMMUNG.test(seg.text)) return '';
+
+    /* Eine Rueckfrage bekommt keine Zustimmung vorangestellt — "Mhm. Und
+       wie erkenne ich das?" klingt falsch, weil zugestimmt wird, bevor
+       ueberhaupt etwas gesagt wurde. */
+    if (/\?\s*$/.test(String(vorheriges.text || ''))) return '';
+
     const h = (chIdx * 977 + segIdx * 31 + 7) >>> 0;
-    if (h % 3 !== 0) return '';                 // nur etwa jeder dritte Wechsel
+    if (h % 4 !== 0) return '';                 // sparsamer als vorher (jeder 4.)
     return liste[h % liste.length] + ' ';
   }
 
@@ -232,13 +250,56 @@ const App = (() => {
     el.speaker.className = 'speaker speaker-' + seg.voice;
   }
 
+  /* ===== ZWEI BEHOBENE URSACHEN FÜR "DERSELBE TEXT ZWEIMAL" (18.08.2026) =====
+
+     URSACHE 1 — Pause war gar keine Pause, sondern ein Stopp.
+     togglePlay() rief frueher stopPlay(), was die Wiedergabe hart abbrach und
+     die Abspielposition auf null zurueckdrehte. Der laufende Abschnitt wurde
+     dabei NICHT als erledigt gezaehlt. Beim naechsten Play begann derselbe
+     Abschnitt also wieder von vorn — hatte man ihn vorher fast zu Ende
+     gehoert, klang das wie "derselbe Text zweimal".
+     Jetzt ist Pause eine echte Pause: das Audio-Element haelt an der Stelle
+     an, an der es steht, und laeuft dort weiter.
+
+     URSACHE 2 — startPlay() konnte eine ZWEITE Abspielschleife starten.
+     Es gab keine Sperre gegen einen Aufruf bei bereits laufender Wiedergabe.
+     Die Sperrbildschirm-Steuerung (Media Session) ruft startPlay() aber
+     direkt auf, und Android feuert dort beim Hantieren mit Play/Pause gern
+     mehrfach. Ergebnis: zwei Schleifen liefen gleichzeitig und sprachen
+     durcheinander — besonders auffaellig an Kapitelgrenzen, wo beide
+     gleichzeitig ins neue Kapitel wechselten. Jetzt prallt ein zweiter
+     Aufruf sauber ab. */
+
   function startPlay() {
     if (state.busy) return;
+    if (state.playing) return;                 // Ursache 2: keine zweite Schleife
+    if (state.paused) { resumePlay(); return; } // fortsetzen statt neu beginnen
     playLoop();
   }
 
+  /* Echte Pause: die Abspielschleife bleibt am Leben und haengt weiter im
+     await. Deshalb hier KEIN state.gen++ — das wuerde sie entwerten. */
+  function pausePlay() {
+    state.playing = false;
+    state.paused  = true;
+    Speech.pause();
+    setPlayUI(false);
+    log('Pausiert.', 'sys');
+  }
+
+  function resumePlay() {
+    state.paused  = false;
+    state.playing = true;
+    setPlayUI(true);
+    silentKeepAlive(true);
+    Speech.resume();
+  }
+
+  /* Harter Stopp: beendet die Schleife wirklich. Fuer Sprung, Zwischenfrage
+     und Ende des Podcasts — nicht fuer die Pausentaste. */
   function stopPlay() {
     state.playing = false;
+    state.paused  = false;
     state.gen++;
     Speech.stop();
     setPlayUI(false);
@@ -246,8 +307,9 @@ const App = (() => {
   }
 
   function togglePlay() {
-    if (state.playing) { stopPlay(); log('Pausiert.', 'sys'); }
-    else { startPlay(); }
+    if (state.playing)     { pausePlay(); }
+    else if (state.paused) { resumePlay(); }
+    else                   { startPlay(); }
   }
 
   function jumpTo(chapterIdx, segIdx = 0, announce = false) {
@@ -289,6 +351,25 @@ const App = (() => {
     startPlay();
   }
 
+  /* "Kannst du hier nochmal von vorne beginnen?" / "Ich hab den Faden verloren."
+     ---------------------------------------------------------------------
+     Gegenstueck zur echten Pause: die Pausentaste setzt bewusst dort fort,
+     wo aufgehoert wurde. Wer wirklich raus ist, kommt hierueber zurueck an
+     den Anfang des LAUFENDEN KAPITELS — nicht nur des einen Abschnitts
+     (dafuer gibt es 'repeat') und nicht des ganzen Podcasts.
+
+     Ohne Vorwurf formuliert: den Faden zu verlieren ist beim Zuhoeren
+     voellig normal, das soll sich nicht wie ein Fehler anfuehlen. */
+  async function kapitelNeu() {
+    const ch = PODCAST_L1.chapters[state.chapter];
+    const ansage = fuellen(pick(MOD.neustart), { kapitel: ch.titel, kurz: ch.kurz });
+    log(ansage, 'recap');
+    state.segment = 0;
+    renderNow(); save(); updateMediaMeta();
+    await Speech.speak(ansage, { voice: 'b' });
+    startPlay();
+  }
+
   /* =====================================================================
      Moderation & Recap
      ---------------------------------------------------------------------
@@ -309,6 +390,7 @@ const App = (() => {
     sprung:               ['Weiter bei {kapitel}.'],
     mikroAnsage:          ['Ja bitte?'],
     wiederholung:         ['Klar, nochmal.'],
+    neustart:             ['Kein Problem, wir fangen bei {kapitel} nochmal von vorne an.'],
     reaktionen:           ['Mhm.']
   };
 
@@ -487,6 +569,7 @@ const App = (() => {
           case 'next':     nextChapter(); return;
           case 'prev':     prevChapter(); return;
           case 'repeat':   await wiederholen(); return;
+          case 'restart':  await kapitelNeu();  return;
           case 'pause':    log('Pausiert.', 'sys'); return;
           case 'resume':   startPlay(); return;
           case 'recap':    await speakRecap('manuell'); if (wasPlaying) startPlay(); return;
@@ -496,12 +579,19 @@ const App = (() => {
       }
 
       if (r.type === 'term') {
-        /* B kuendigt die Wortmeldung an ... */
-        const ansage = pick(MOD.wortmeldung);
-        log(ansage, 'recap');
-        await Speech.speak(ansage, { voice: 'b' });
+        /* ===== BEHOBEN: DOPPELTE FRAGE-ANKUENDIGUNG (18.08.2026) =====
+           Hier stand frueher zusaetzlich MOD.wortmeldung ("Oh, wir haben eine
+           Zwischenfrage. Hoeren wir mal rein."). Das war noch aus der Zeit
+           VOR der Sofort-Unterbrechung sinnvoll, als die Frage erst nach der
+           Ankuendigung kam.
 
-        /* ... A antwortet fachlich. */
+           Seit die Aufnahme mit MOD.mikroAnsage eingeleitet wird, ist die
+           Frage an dieser Stelle laengst gestellt und verstanden. Die zweite
+           Ankuendigung kam also NACH der Frage — "hoeren wir mal rein",
+           obwohl schon zugehoert wurde. Genau die von ruckG4zz gemeldete
+           Dopplung: Ansage, Frage, nochmal Ansage, dann erst die Antwort.
+
+           Jetzt geht es direkt in die Antwort. */
         let antwort = pick(MOD.antwortStart) + ' ' + r.entry.antwort;
         if (r.unsicher) {
           antwort = `Ich nehme an, du meinst ${r.entry.label}. ` + r.entry.antwort;
@@ -523,10 +613,8 @@ const App = (() => {
         return;
       }
 
-      const ansage = pick(MOD.wortmeldung);
-      log(ansage, 'recap');
-      await Speech.speak(ansage, { voice: 'b' });
-
+      /* Auch hier keine zweite Ankuendigung mehr (siehe oben) — direkt zur
+         ehrlichen Absage. */
       const absage = pick(MOD.keinTreffer);
       log(absage, 'err');
       showNoMatch();
@@ -810,8 +898,10 @@ const App = (() => {
     if (!('mediaSession' in navigator)) return;
     const h = navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);
     try {
+      /* Sperrbildschirm: Pause muss hier ebenfalls eine ECHTE Pause sein,
+         sonst springt der Abschnitt beim Fortsetzen an den Anfang zurueck. */
       h('play',          () => startPlay());
-      h('pause',         () => stopPlay());
+      h('pause',         () => pausePlay());
       h('nexttrack',     () => nextChapter());
       h('previoustrack', () => prevChapter());
     } catch (_) {}

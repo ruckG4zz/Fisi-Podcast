@@ -94,26 +94,31 @@ const Speech = (() => {
      REINER englischer Fachbegriff soll auch englisch klingen, statt steif
      eingedeutscht vorgelesen zu werden.
 
-     WARUM DIESE TABELLE VORERST LEER IST — das ist Absicht, kein Vergessen:
-
      Der saubere Weg waere SSML mit <lang xml:lang="en-US">. Genau das
      unterstuetzt aber KEINE der beiden gewaehlten Stimmen: Chirp3-HD kann
      gar kein SSML, und Studio unterstuetzt SSML ausdruecklich OHNE <lang>.
      (Google-Doku, geprueft 18.08.2026.)
 
-     Bleibt die lautschriftliche Umschreibung — also z.B. "Full Duplex"
-     als "Full Djuplex" zu schreiben, damit es englisch klingt. Das ist
-     aber ein zweischneidiges Schwert: Chirp3-HD und Studio sind moderne
-     Modelle, die englische Begriffe im deutschen Satz oft schon von sich
-     aus korrekt aussprechen. Eine "Korrektur" wuerde es dann VERSCHLECHTERN.
+     Bleibt die lautschriftliche Umschreibung — deutsch gelesen ergibt den
+     englischen Klang.
 
-     Deshalb wird hier nichts auf Verdacht eingetragen. Die Tabelle wird
-     gezielt gefuellt, nachdem ruckG4zz eine echte Hoerprobe gemacht und
-     benannt hat, welche Begriffe tatsaechlich falsch klingen.
-     Format:  [/\bFull Duplex\b/g, 'Full Djuplex']
+     WARUM HIER SO WENIG DRINSTEHT — das ist Absicht, kein Vergessen:
+     Nach der ersten echten Hoerprobe hat ruckG4zz bestaetigt, dass die
+     englischen Begriffe insgesamt sauber kommen. Chirp3-HD und Studio sind
+     moderne Modelle und sprechen sie im deutschen Satz meist von selbst
+     richtig aus. Eine "Korrektur" auf Verdacht wuerde es VERSCHLECHTERN.
+
+     Deshalb steht hier ausschliesslich, was tatsaechlich als falsch
+     gehoert wurde, plus Faelle mit nachweislich derselben Ursache.
+     Die Tabelle waechst nur mit echten Hoerbefunden, nicht mit Vermutungen.
      --------------------------------------------------------------------- */
   const ENGLISCH_FIX = [
-    // absichtlich leer — wird nach der Hoerprobe befuellt, siehe oben
+    /* "Fiber" -> deutsch gelesen "Fieber". Von ruckG4zz gemeldet. */
+    [/\bFiber\b/gi,   'Faiber'],
+    /* Britische Schreibweise, gleiche Ursache. */
+    [/\bFibre\b/gi,   'Faiber'],
+    /* Taucht bei LWL-Themen auf und kippt deutsch gelesen ebenso. */
+    [/\bSplice\b/gi,  'Splais']
   ];
 
   function fixForTTS(text) {
@@ -173,6 +178,13 @@ const Speech = (() => {
     return player;
   }
 
+  /* Zeiger auf die gerade laufende Wiedergabe, damit stop() sie aufloesen
+     kann. NOETIG SEIT DER ECHTEN PAUSE: ein pausiertes <audio> feuert kein
+     'ended'. Wuerde jetzt gesprungen oder eine Frage gestellt, bliebe die
+     Zusage fuer immer offen und die Abspielschleife haengen — der Podcast
+     waere tot, ohne dass man den Grund sieht. */
+  let laufendeWiedergabe = null;
+
   function spieleUrl(url, myGen) {
     return new Promise(resolve => {
       const a = holePlayer();
@@ -181,8 +193,10 @@ const Speech = (() => {
       const aufraeumen = () => {
         a.removeEventListener('ended', beiEnde);
         a.removeEventListener('error', beiFehler);
+        if (laufendeWiedergabe && laufendeWiedergabe.id === myGen) laufendeWiedergabe = null;
       };
       const fertig = (p) => { if (done) return; done = true; aufraeumen(); resolve(p); };
+      laufendeWiedergabe = { id: myGen, abbrechen: () => fertig({ stopped: true }) };
       const beiEnde   = () => fertig({ stopped: myGen !== speakGen });
       const beiFehler = () => fertig({ stopped: true, error: 'audio-wiedergabe-fehler' });
 
@@ -279,6 +293,14 @@ const Speech = (() => {
         // mitten im abgebrochenen Satz wieder anfaengt.
         player.currentTime = 0;
       } catch (_) {}
+    }
+    /* Eine haengende (z.B. pausierte) Wiedergabe aktiv aufloesen — siehe
+       Kommentar bei laufendeWiedergabe. Ohne das bliebe die Abspielschleife
+       nach einem Sprung aus der Pause heraus fuer immer stehen. */
+    if (laufendeWiedergabe) {
+      const w = laufendeWiedergabe;
+      laufendeWiedergabe = null;
+      w.abbrechen();
     }
   }
 
