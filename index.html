@@ -100,6 +100,28 @@ input[type=text]::placeholder{color:var(--fg-dim)}
 .hint code{background:var(--bg3);padding:1px 6px;border-radius:4px;color:var(--accent);
   font-size:.92em;white-space:nowrap}
 
+/* --- Stimmenauswahl / Cloud --- */
+.voicepick{display:flex;flex-direction:column;gap:8px}
+.opt{display:flex;align-items:flex-start;gap:10px;padding:11px 12px;
+  background:var(--bg3);border:1px solid var(--line);border-radius:10px;cursor:pointer}
+.opt:has(input:checked){border-color:var(--accent-dim);background:#14232b}
+.opt input{margin-top:3px;accent-color:var(--accent);flex:none}
+.opt span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.opt b{font-size:.92rem;font-weight:600}
+.opt em{font-style:normal;font-size:.78rem;color:var(--fg-dim);line-height:1.45}
+.warnbox{background:#1d2a1e;border:1px solid var(--ok);color:#c9f5cf;
+  border-radius:10px;padding:10px 12px;font-size:.8rem;line-height:1.5;margin:14px 0 10px}
+.vrow{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.vrow label{flex:1;min-width:150px;display:flex;flex-direction:column;gap:5px;
+  font-size:.8rem;color:var(--fg-dim)}
+.vhint{color:var(--fg-dim);opacity:.7;font-size:.72rem}
+select{font:inherit;font-size:.86rem;padding:9px 10px;border-radius:9px;
+  background:var(--bg3);border:1px solid var(--line);color:var(--fg);width:100%}
+select:focus{outline:none;border-color:var(--accent-dim)}
+.usage-bar{height:6px;background:var(--bg2);border-radius:99px;overflow:hidden;margin:8px 0 4px}
+.usage-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent-dim),var(--accent));border-radius:99px}
+.usage-bar.hot i{background:linear-gradient(90deg,var(--warn),var(--bad))}
+
 /* --- Mikrofon-Live-Rückmeldung --- */
 .micbox{margin-top:11px;background:var(--bg3);border:1px solid var(--accent-dim);
   border-radius:10px;padding:12px}
@@ -253,6 +275,59 @@ footer a{color:var(--accent-dim)}
     <div class="log" id="log"></div>
   </div>
 
+  <!-- Stimmen-Qualität -->
+  <div class="card">
+    <h2>Stimmen</h2>
+    <div class="voicepick">
+      <label class="opt">
+        <input type="radio" name="prov" id="provBrowser" value="browser" checked>
+        <span><b>Browser-Stimme</b><em>kostenlos, aber monoton — stoppt bei gesperrtem Bildschirm</em></span>
+      </label>
+      <label class="opt">
+        <input type="radio" name="prov" id="provCloud" value="cloud">
+        <span><b>Google Cloud (WaveNet)</b><em>deutlich natürlicher — läuft auch bei gesperrtem Bildschirm weiter</em></span>
+      </label>
+    </div>
+
+    <div id="cloudBox" hidden>
+      <div class="warnbox">
+        Der Schlüssel wird <strong>nur auf diesem Gerät</strong> gespeichert.
+        Er landet nie im Programmcode und nie auf GitHub.
+      </div>
+
+      <div class="qrow">
+        <input type="password" id="apiKey" placeholder="API-Schlüssel hier einfügen" autocomplete="off" spellcheck="false">
+        <button id="apiSave">Sichern</button>
+      </div>
+      <div class="controls" style="margin-top:8px">
+        <button id="apiShow">Anzeigen</button>
+        <button id="apiTest">Verbindung testen</button>
+        <button id="apiClear">Schlüssel löschen</button>
+      </div>
+      <div id="apiStatus" class="src-note"></div>
+
+      <div class="vrow">
+        <label>Stimme A <span class="vhint">männlich</span>
+          <select id="voiceA"></select>
+        </label>
+        <label>Stimme B <span class="vhint">weiblich</span>
+          <select id="voiceB"></select>
+        </label>
+      </div>
+      <div class="controls">
+        <button id="voiceLoad">Stimmen von Google laden</button>
+        <button id="voiceProbe">Beide anhören</button>
+      </div>
+
+      <h2 style="margin-top:20px">Verbrauch &amp; Kosten</h2>
+      <div class="diag" id="usage"></div>
+      <div class="controls">
+        <button id="cacheClear">Zwischenspeicher leeren</button>
+        <button id="usageReset">Zähler zurücksetzen</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Technik -->
   <div class="card">
     <h2>Technik-Check</h2>
@@ -271,6 +346,7 @@ footer a{color:var(--accent-dim)}
 
 <script src="content-l1.js"></script>
 <script src="matcher.js"></script>
+<script src="cloud-tts.js"></script>
 <script src="speech.js"></script>
 <script src="app.js"></script>
 <script>

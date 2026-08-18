@@ -429,6 +429,142 @@ const App = (() => {
   }
 
   /* =====================================================================
+     Stimmen-Einstellungen (Cloud-TTS)
+     ---------------------------------------------------------------------
+     Der API-Schluessel wird AUSSCHLIESSLICH hier im Geraetespeicher
+     gehalten. Er steht in keiner Programmdatei und wird nirgendwohin
+     uebertragen ausser an Google selbst, beim tatsaechlichen Sprechen.
+     ===================================================================== */
+  const CFG_KEY = 'fisi-podcast-stimmen';
+
+  const cfg = {
+    provider: 'browser',
+    apiKey: '',
+    voiceA: 'de-DE-Wavenet-B',
+    voiceB: 'de-DE-Wavenet-F'
+  };
+
+  function cfgLaden() {
+    try {
+      const d = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
+      Object.assign(cfg, {
+        provider: d.provider === 'cloud' ? 'cloud' : 'browser',
+        apiKey:   d.apiKey  || '',
+        voiceA:   d.voiceA  || cfg.voiceA,
+        voiceB:   d.voiceB  || cfg.voiceB
+      });
+    } catch (_) {}
+    anwendenCfg();
+  }
+
+  function cfgSpeichern() {
+    try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (_) {}
+    anwendenCfg();
+  }
+
+  function anwendenCfg() {
+    Speech.setCloudConfig({ apiKey: cfg.apiKey || null, voiceA: cfg.voiceA, voiceB: cfg.voiceB });
+    Speech.setProvider(cfg.provider);
+    if (el.provBrowser) el.provBrowser.checked = (cfg.provider !== 'cloud');
+    if (el.provCloud)   el.provCloud.checked   = (cfg.provider === 'cloud');
+    if (el.cloudBox)    el.cloudBox.hidden     = (cfg.provider !== 'cloud');
+    if (el.apiKey && document.activeElement !== el.apiKey) el.apiKey.value = cfg.apiKey || '';
+    renderUsage();
+  }
+
+  function apiStatus(text, kind) {
+    el.apiStatus.textContent = text;
+    el.apiStatus.style.color = kind === 'bad' ? 'var(--bad)'
+                             : kind === 'ok'  ? 'var(--ok)'
+                             : 'var(--fg-dim)';
+  }
+
+  async function renderUsage() {
+    if (!el.usage) return;
+    if (cfg.provider !== 'cloud') { el.usage.innerHTML = ''; return; }
+
+    const klasse = CloudTTS.klasseAusName(cfg.voiceA);
+    const v = CloudTTS.verbrauch(klasse);
+    const anzahl = await CloudTTS.cacheGroesse();
+    const heiss = v.anteilProzent > 80;
+
+    const fmt = n => n.toLocaleString('de-DE');
+    el.usage.innerHTML = `
+      <div><span>Stimmenklasse</span><b>${v.klasse}</b></div>
+      <div><span>Synthetisiert (${v.monat})</span><b>${fmt(v.zeichen)} Zeichen</b></div>
+      <div><span>Aus Zwischenspeicher</span><b>${fmt(v.ausCache)} Zeichen — kostenlos</b></div>
+      <div><span>Gespeicherte Abschnitte</span><b>${fmt(anzahl)}</b></div>
+      <div><span>Kosten diesen Monat</span><b>${v.kostenUSD > 0 ? '$' + v.kostenUSD.toFixed(2) : '$0.00'}</b></div>
+      <div class="usage-bar${heiss ? ' hot' : ''}"><i style="width:${Math.min(100, v.anteilProzent).toFixed(1)}%"></i></div>
+      <div><span>Freikontingent</span><b>${v.anteilProzent.toFixed(1)} % von ${fmt(v.freiKontingent)}</b></div>`;
+  }
+
+  /* Stimmen von Google holen und in die Auswahlfelder einsetzen */
+  async function stimmenLaden() {
+    if (!cfg.apiKey) { apiStatus('Erst den Schlüssel sichern.', 'bad'); return; }
+    apiStatus('Lade Stimmenliste …');
+    try {
+      const liste = await CloudTTS.stimmenListe(cfg.apiKey);
+      if (!liste.length) { apiStatus('Google hat keine deutschen Stimmen gemeldet.', 'bad'); return; }
+
+      const fuellen = (sel, gewaehlt, bevorzugtGeschlecht) => {
+        sel.innerHTML = '';
+        liste.forEach(v => {
+          const o = document.createElement('option');
+          o.value = v.name;
+          o.textContent = `${v.name}  (${v.geschlecht === 'MALE' ? 'm' : v.geschlecht === 'FEMALE' ? 'w' : '?'}, ${v.klasse})`;
+          sel.appendChild(o);
+        });
+        const treffer = liste.find(v => v.name === gewaehlt)
+          || liste.find(v => v.geschlecht === bevorzugtGeschlecht && v.klasse === 'Wavenet')
+          || liste[0];
+        if (treffer) sel.value = treffer.name;
+      };
+
+      fuellen(el.voiceA, cfg.voiceA, 'MALE');
+      fuellen(el.voiceB, cfg.voiceB, 'FEMALE');
+      cfg.voiceA = el.voiceA.value;
+      cfg.voiceB = el.voiceB.value;
+      cfgSpeichern();
+      apiStatus(liste.length + ' deutsche Stimmen geladen.', 'ok');
+    } catch (e) {
+      apiStatus(e.message || 'Stimmen konnten nicht geladen werden.', 'bad');
+    }
+  }
+
+  /* Kurze Hörprobe beider Stimmen — kostet ein paar Dutzend Zeichen */
+  async function stimmenProbe() {
+    if (!cfg.apiKey) { apiStatus('Erst den Schlüssel sichern.', 'bad'); return; }
+    stopPlay();
+    apiStatus('Hörprobe läuft …');
+    const alt = Speech.getProvider();
+    Speech.setProvider('cloud');
+    try {
+      await Speech.speak('Ich bin Stimme A und übernehme die Erklärungen.', { voice: 'a' });
+      await Speech.speak('Und ich bin Stimme B, ich stelle die Zwischenfragen.', { voice: 'b' });
+      const f = Speech.letzterFehler();
+      apiStatus(f ? ('Cloud fehlgeschlagen: ' + f) : 'Hörprobe fertig.', f ? 'bad' : 'ok');
+    } catch (e) {
+      apiStatus(e.message || 'Hörprobe fehlgeschlagen.', 'bad');
+    } finally {
+      Speech.setProvider(alt);
+      renderUsage();
+    }
+  }
+
+  /* Verbindungstest: nutzt die kostenlose Stimmenliste, synthetisiert nichts */
+  async function verbindungTesten() {
+    if (!cfg.apiKey) { apiStatus('Erst einen Schlüssel eintragen und sichern.', 'bad'); return; }
+    apiStatus('Teste Verbindung …');
+    try {
+      const liste = await CloudTTS.stimmenListe(cfg.apiKey);
+      apiStatus(`Verbindung steht. ${liste.length} deutsche Stimmen verfügbar. (Dieser Test kostet nichts.)`, 'ok');
+    } catch (e) {
+      apiStatus(e.message || 'Verbindung fehlgeschlagen.', 'bad');
+    }
+  }
+
+  /* =====================================================================
      Media Session (Sperrbildschirm-Steuerung)
      ---------------------------------------------------------------------
      EHRLICHE EINORDNUNG: Die Web Speech API ist kein Media-Element.
@@ -442,6 +578,10 @@ const App = (() => {
   let silentAudio = null;
 
   function silentKeepAlive(on) {
+    /* Bei Cloud-Stimme unnoetig: dort laeuft die Wiedergabe ohnehin ueber ein
+       echtes <audio>-Element, das die Mediensitzung selbst traegt. Der stille
+       Ton wuerde sich damit nur ins Gehege kommen. */
+    if (Speech.cloudAktiv()) { if (silentAudio) { try { silentAudio.pause(); } catch (_) {} } return; }
     try {
       if (!silentAudio) {
         silentAudio = new Audio(
@@ -487,7 +627,10 @@ const App = (() => {
     // DOM einsammeln
     ['play','mic','ask','qtext','chapters','log','bar','nowChapter','nowProgress',
      'transcript','speaker','source','diag','reset','next','prev',
-     'micbox','micStatus','micHeardText']
+     'micbox','micStatus','micHeardText',
+     'provBrowser','provCloud','cloudBox','apiKey','apiSave','apiShow','apiTest',
+     'apiClear','apiStatus','voiceA','voiceB','voiceLoad','voiceProbe',
+     'usage','cacheClear','usageReset']
       .forEach(id => el[id] = document.getElementById(id));
 
     el.title = document.getElementById('title');
@@ -526,6 +669,54 @@ const App = (() => {
     el.ask.onclick   = askByText;
     el.reset.onclick = resetProgress;
     el.qtext.addEventListener('keydown', e => { if (e.key === 'Enter') askByText(); });
+
+    /* --- Stimmen-Einstellungen --- */
+    el.provBrowser.onchange = () => { if (el.provBrowser.checked) { cfg.provider = 'browser'; cfgSpeichern(); } };
+    el.provCloud.onchange   = () => {
+      if (!el.provCloud.checked) return;
+      cfg.provider = 'cloud'; cfgSpeichern();
+      if (!cfg.apiKey) apiStatus('Trag deinen API-Schlüssel ein und sichere ihn.', 'bad');
+    };
+
+    el.apiSave.onclick = () => {
+      const k = (el.apiKey.value || '').trim();
+      if (!k) { apiStatus('Das Feld ist leer.', 'bad'); return; }
+      cfg.apiKey = k; cfgSpeichern();
+      el.apiKey.type = 'password';
+      el.apiShow.textContent = 'Anzeigen';
+      apiStatus('Schlüssel auf diesem Gerät gesichert. Jetzt „Verbindung testen".', 'ok');
+    };
+
+    el.apiShow.onclick = () => {
+      const zeigen = el.apiKey.type === 'password';
+      el.apiKey.type = zeigen ? 'text' : 'password';
+      el.apiShow.textContent = zeigen ? 'Verbergen' : 'Anzeigen';
+    };
+
+    el.apiClear.onclick = () => {
+      cfg.apiKey = ''; el.apiKey.value = ''; cfgSpeichern();
+      apiStatus('Schlüssel von diesem Gerät gelöscht.', 'ok');
+    };
+
+    el.apiTest.onclick    = verbindungTesten;
+    el.voiceLoad.onclick  = stimmenLaden;
+    el.voiceProbe.onclick = stimmenProbe;
+
+    el.voiceA.onchange = () => { cfg.voiceA = el.voiceA.value; cfgSpeichern(); };
+    el.voiceB.onchange = () => { cfg.voiceB = el.voiceB.value; cfgSpeichern(); };
+
+    el.cacheClear.onclick = async () => {
+      await CloudTTS.cacheLeeren();
+      apiStatus('Zwischenspeicher geleert. Die nächsten Abschnitte werden neu synthetisiert.', 'ok');
+      renderUsage();
+    };
+    el.usageReset.onclick = () => {
+      CloudTTS.zaehlerZuruecksetzen();
+      apiStatus('Verbrauchszähler zurückgesetzt (nur die Anzeige, nicht der Google-Stand).', 'ok');
+      renderUsage();
+    };
+
+    cfgLaden();
 
     document.getElementById('resumeGo').onclick = async () => {
       el.resumeBox.hidden = true;

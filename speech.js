@@ -171,12 +171,103 @@ const Speech = (() => {
     };
   }
 
+  /* =====================================================================
+     STIMMEN-QUELLE (Provider)
+     ---------------------------------------------------------------------
+     'browser' = Web Speech API, kostenlos, aber monoton und bricht bei
+                 gesperrtem Bildschirm ab (kein Media-Element).
+     'cloud'   = Google Cloud TTS. Liefert fertige MP3-Daten, die in einem
+                 ECHTEN <audio>-Element abgespielt werden — deshalb laeuft
+                 die Wiedergabe bei gesperrtem Bildschirm weiter.
+
+     Der Schluessel wird ausschliesslich von aussen gesetzt (aus dem
+     Geraetespeicher, den ruckG4zz selbst befuellt). Hier steht keiner drin.
+     ===================================================================== */
+  let provider = 'browser';
+  const cloudConfig = { apiKey: null, voiceA: 'de-DE-Wavenet-B', voiceB: 'de-DE-Wavenet-F', rate: 1.0 };
+  let letzterCloudFehler = null;
+
+  function setProvider(p) { provider = (p === 'cloud') ? 'cloud' : 'browser'; }
+  function getProvider()  { return provider; }
+  function setCloudConfig(cfg) { Object.assign(cloudConfig, cfg || {}); }
+  function getCloudConfig() { return Object.assign({}, cloudConfig, { apiKey: cloudConfig.apiKey ? '(gesetzt)' : null }); }
+  function cloudAktiv() { return provider === 'cloud' && !!cloudConfig.apiKey; }
+  function letzterFehler() { return letzterCloudFehler; }
+
+  /* Ein einziges, dauerhaftes Audio-Element. Bewusst nicht pro Segment neu:
+     nur so bleibt die Mediensteuerung des Systems daran haengen und die
+     Wiedergabe im Hintergrund erhalten. */
+  let player = null;
+  function holePlayer() {
+    if (!player) {
+      player = new Audio();
+      player.preload = 'auto';
+    }
+    return player;
+  }
+
+  function spieleUrl(url, myGen) {
+    return new Promise(resolve => {
+      const a = holePlayer();
+      let done = false;
+
+      const aufraeumen = () => {
+        a.removeEventListener('ended', beiEnde);
+        a.removeEventListener('error', beiFehler);
+      };
+      const fertig = (p) => { if (done) return; done = true; aufraeumen(); resolve(p); };
+      const beiEnde   = () => fertig({ stopped: myGen !== speakGen });
+      const beiFehler = () => fertig({ stopped: true, error: 'audio-wiedergabe-fehler' });
+
+      a.addEventListener('ended', beiEnde);
+      a.addEventListener('error', beiFehler);
+
+      a.src = url;
+      a.play().catch(e => {
+        // Haeufigster Fall: Wiedergabe ohne vorherige Nutzergeste blockiert
+        fertig({ stopped: true, error: 'wiedergabe-blockiert: ' + (e && e.message) });
+      });
+    });
+  }
+
+  async function speakCloud(text, opts) {
+    const myGen = speakGen;
+    const stimme = (opts.voice === 'b') ? cloudConfig.voiceB : cloudConfig.voiceA;
+    try {
+      const erg = await CloudTTS.synthese(text, {
+        apiKey: cloudConfig.apiKey,
+        voice: stimme,
+        rate: opts.rate != null ? opts.rate : cloudConfig.rate
+      });
+      if (myGen !== speakGen) return { stopped: true };   // zwischenzeitlich gestoppt
+      letzterCloudFehler = null;
+      return await spieleUrl(erg.url, myGen);
+    } catch (e) {
+      /* Cloud fehlgeschlagen: NICHT verstummen, sondern hoerbar auf die
+         kostenlose Browserstimme zurueckfallen. Der Fehler wird gemerkt
+         und in der Oberflaeche angezeigt, damit er nicht still bleibt. */
+      letzterCloudFehler = (e && e.message) || 'Unbekannter Cloud-Fehler';
+      if (myGen !== speakGen) return { stopped: true };
+      const r = await speakBrowser(text, opts);
+      return Object.assign({}, r, { cloudFehler: letzterCloudFehler });
+    }
+  }
+
   /**
    * Spricht einen Text. Resolved, wenn fertig gesprochen.
+   * Waehlt automatisch die eingestellte Stimmen-Quelle.
+   */
+  function speak(text, opts = {}) {
+    if (cloudAktiv()) return speakCloud(text, opts);
+    return speakBrowser(text, opts);
+  }
+
+  /**
+   * Spricht einen Text ueber die Browser-Stimme. Resolved, wenn fertig.
    * Bei stop() resolved die Promise ebenfalls (mit {stopped:true}),
    * damit der Aufrufer nicht hängen bleibt.
    */
-  function speak(text, opts = {}) {
+  function speakBrowser(text, opts = {}) {
     return new Promise(resolve => {
       if (!synth) return resolve({ stopped: true, error: 'kein TTS' });
 
@@ -306,12 +397,21 @@ const Speech = (() => {
     currentUtter = null;
     stopKeepAlive();
     if (synth) synth.cancel();
+    // Auch die Cloud-Wiedergabe anhalten, sonst redet sie beim
+    // Mikrofon-Druck munter weiter.
+    if (player) { try { player.pause(); } catch (_) {} }
   }
 
-  function pause()  { if (synth && synth.speaking && !synth.paused) synth.pause(); }
-  function resume() { if (synth && synth.paused) synth.resume(); }
-  function isPaused()   { return !!(synth && synth.paused); }
-  function isSpeaking() { return !!(synth && synth.speaking); }
+  function pause() {
+    if (synth && synth.speaking && !synth.paused) synth.pause();
+    if (player && !player.paused) { try { player.pause(); } catch (_) {} }
+  }
+  function resume() {
+    if (synth && synth.paused) synth.resume();
+    if (player && player.paused && player.src) { player.play().catch(() => {}); }
+  }
+  function isPaused()   { return !!(synth && synth.paused) || !!(player && player.paused && player.src && !player.ended); }
+  function isSpeaking() { return !!(synth && synth.speaking) || !!(player && player.src && !player.paused && !player.ended); }
 
   /* ---------------------------------------------------------------------
      Spracherkennung.
@@ -457,6 +557,9 @@ const Speech = (() => {
     init, speak, stop, pause, resume, isPaused, isSpeaking,
     listen, cancelListen, sttSupported, ttsSupported, voiceInfo,
     micPermission, requestMic, isMobile: () => IS_MOBILE,
-    _fixForTTS: fixForTTS   // für Diagnose/Tests
+    setProvider, getProvider, setCloudConfig, getCloudConfig,
+    cloudAktiv, letzterFehler,
+    holePlayer,               // fuer die Mediensteuerung in app.js
+    _fixForTTS: fixForTTS     // für Diagnose/Tests
   };
 })();
