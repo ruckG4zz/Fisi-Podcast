@@ -510,6 +510,32 @@ const MODERATION = {
     'Weiter geht es. Zuletzt waren wir bei {kapitel}, also {kurz}.'
   ],
 
+  /* ---------------------------------------------------------------------
+     ÜBERLEITUNG AM ENDE EINER SCHICHT (neu 18.08.2026)
+     ---------------------------------------------------------------------
+     Wird gesprochen, wenn eine Schicht komplett durchgelaufen ist und die
+     naechste automatisch anschliesst.
+
+     WARUM AUTOMATISCH UND NICHT PER KNOPF (Vorgabe ruckG4zz): gehoert wird
+     unter anderem beim Autofahren. Eine Rueckfrage mit Knopfdruck waere
+     dort nicht nur unbequem, sondern schlicht nicht bedienbar — der
+     Podcast wuerde einfach verstummen. Deshalb laeuft es von allein
+     weiter, angekuendigt statt abgefragt.
+
+     Die Auswahl erfolgt in app.js DETERMINISTISCH ueber den Schicht-Index,
+     nicht zufaellig — gleiche Begruendung wie bei den Reaktions-Einwuerfen:
+     ein bei jedem Durchlauf anderer Text waere jedes Mal ein neuer Eintrag
+     im Zwischenspeicher und muesste neu synthetisiert werden.
+
+     {fertig} und {naechste} sind die Schichtnamen, {thema} der Zusatz
+     ("der Sicherungsschicht"). Alle drei werden von app.js gefuellt.
+     --------------------------------------------------------------------- */
+  schichtwechsel: [
+    'Das war {fertig}. Wir machen direkt weiter mit {naechste}, {thema}. Bleib einfach dran.',
+    'Damit ist {fertig} abgeschlossen. Ohne Pause weiter zu {naechste}, {thema}.',
+    'Und damit sind wir durch mit {fertig}. Es geht nahtlos weiter mit {naechste}, {thema}.'
+  ],
+
   /* B bestätigt einen Kapitelsprung. {kapitel} ersetzt. */
   sprung: [
     'Alles klar, wir springen zu {kapitel}.',

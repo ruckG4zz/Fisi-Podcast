@@ -27,15 +27,18 @@ const App = (() => {
     { id: 'l1', key: 'fisi-podcast-l1-v1',
       podcast:  (typeof PODCAST_L1  !== 'undefined') ? PODCAST_L1  : null,
       register: (typeof REGISTER_L1 !== 'undefined') ? REGISTER_L1 : [],
-      knopf: 'Layer 1', kurz: 'Bitübertragung', gesprochen: 'Layer eins' },
+      knopf: 'Layer 1', kurz: 'Bitübertragung', gesprochen: 'Layer eins',
+      thema: 'der Bitübertragungsschicht' },
     { id: 'l2', key: 'fisi-podcast-l2-v1',
       podcast:  (typeof PODCAST_L2  !== 'undefined') ? PODCAST_L2  : null,
       register: (typeof REGISTER_L2 !== 'undefined') ? REGISTER_L2 : [],
-      knopf: 'Layer 2', kurz: 'Sicherung', gesprochen: 'Layer zwei' },
+      knopf: 'Layer 2', kurz: 'Sicherung', gesprochen: 'Layer zwei',
+      thema: 'der Sicherungsschicht' },
     { id: 'l3', key: 'fisi-podcast-l3-v1',
       podcast:  (typeof PODCAST_L3  !== 'undefined') ? PODCAST_L3  : null,
       register: (typeof REGISTER_L3 !== 'undefined') ? REGISTER_L3 : [],
-      knopf: 'Layer 3', kurz: 'Vermittlung', gesprochen: 'Layer drei' }
+      knopf: 'Layer 3', kurz: 'Vermittlung', gesprochen: 'Layer drei',
+      thema: 'der Vermittlungsschicht' }
   ].filter(l => l.podcast && l.podcast.chapters && l.podcast.chapters.length);
 
   const LAYER_KEY = 'fisi-podcast-schicht';
@@ -375,8 +378,12 @@ const App = (() => {
      MUSS fuer Wiedergabe UND Vorabladen identisch sein, sonst zeigen die
      beiden auf unterschiedliche Eintraege im Zwischenspeicher und das
      Vorabladen waere wirkungslos (und wuerde doppelt verbrauchen). */
-  function segmentText(chIdx, segIdx) {
-    const ch = P().chapters[chIdx];
+  /* Layer-bezogene Fassung — noetig fuer das Vorabladen ueber die
+     Schichtgrenze hinweg (siehe naechstePosition). */
+  function segmentTextVon(layerIdx, chIdx, segIdx) {
+    const l = LAYERS[layerIdx];
+    if (!l) return null;
+    const ch = l.podcast.chapters[chIdx];
     if (!ch) return null;
     const seg = ch.segments[segIdx];
     if (!seg) return null;
@@ -384,12 +391,44 @@ const App = (() => {
     return { text: reaktionFuer(chIdx, segIdx, seg, vorheriges) + seg.text, voice: seg.voice, seg };
   }
 
-  /* Die naechste Position im Podcast — ueber Kapitelgrenzen hinweg. */
-  function naechstePosition(chIdx, segIdx) {
-    const ch = P().chapters[chIdx];
-    if (ch && segIdx + 1 < ch.segments.length) return [chIdx, segIdx + 1];
-    if (chIdx + 1 < P().chapters.length) return [chIdx + 1, 0];
+  function segmentText(chIdx, segIdx) {
+    return segmentTextVon(state.layer, chIdx, segIdx);
+  }
+
+  /* Die naechste Position — ueber Kapitel- UND Schichtgrenzen hinweg.
+     ---------------------------------------------------------------------
+     Der Sprung ueber die Schichtgrenze ist neu (18.08.2026). Ohne ihn
+     endete das Vorabladen am letzten Segment einer Schicht: das erste
+     Segment der naechsten haette erst nach dem Wechsel synthetisiert
+     werden muessen. Genau in dieser Luecke raeumt Android die Wiedergabe
+     im Hintergrund ab — der automatische Uebergang waere also ausgerechnet
+     im Auto, bei dunklem Bildschirm, am unzuverlaessigsten gewesen.
+     Rueckgabe jetzt [layerIdx, chapterIdx, segmentIdx]. */
+  function naechstePosition(layerIdx, chIdx, segIdx) {
+    const l = LAYERS[layerIdx];
+    if (!l) return null;
+    const ch = l.podcast.chapters[chIdx];
+    if (ch && segIdx + 1 < ch.segments.length) return [layerIdx, chIdx, segIdx + 1];
+    if (chIdx + 1 < l.podcast.chapters.length) return [layerIdx, chIdx + 1, 0];
+    if (layerIdx + 1 < LAYERS.length)          return [layerIdx + 1, 0, 0];
     return null;
+  }
+
+  /* Der gesprochene Uebergang von einer Schicht in die naechste.
+     DETERMINISTISCH ueber den Schicht-Index gewaehlt, nicht zufaellig:
+     nur so trifft das Vorabladen spaeter denselben Eintrag im
+     Zwischenspeicher wie die Wiedergabe. Bei Zufall waere es jedes Mal ein
+     neuer Text und damit eine neue Synthese. */
+  function uebergangsText(vonIdx) {
+    const alt = LAYERS[vonIdx];
+    const neu = LAYERS[vonIdx + 1];
+    if (!alt || !neu) return '';
+    const liste = MOD.schichtwechsel;
+    return fuellen(liste[vonIdx % liste.length], {
+      fertig:   alt.gesprochen,
+      naechste: neu.gesprochen,
+      thema:    neu.thema || neu.kurz
+    });
   }
 
   async function playLoop() {
@@ -411,11 +450,56 @@ const App = (() => {
           state.chapter++; state.segment = 0;
           renderNow(); save(); updateMediaMeta();
           continue;
-        } else {
-          log(schicht().knopf + ' ist durch. Gut gemacht.', 'sys');
-          stopPlay();
-          break;
         }
+
+        /* ===== SCHICHT ZU ENDE — AUTOMATISCH WEITER (18.08.2026) =====
+
+           Vorher endete hier alles: Meldung, Stopp, Stille. Wer weiterhoeren
+           wollte, musste die naechste Schicht antippen und erneut auf
+           Abspielen druecken.
+
+           Vorgabe von ruckG4zz: gehoert wird unter anderem beim Autofahren.
+           Eine Bedienaufforderung ist dort nicht nur unbequem, sondern
+           schlicht nicht ausfuehrbar — der Podcast waere einfach verstummt.
+           Deshalb laeuft es jetzt von allein weiter, mit einer kurzen
+           gesprochenen Ueberleitung.
+
+           BEWUSST NICHT ueber layerWechseln(): das ruft stopPlay(), was die
+           eigene Abspielschleife hier mitten im Lauf abraeumen wuerde. Der
+           Wechsel passiert deshalb direkt im Zustand, die Schleife laeuft
+           mit `continue` einfach in der neuen Schicht weiter. */
+        const naechsterIdx = state.layer + 1;
+        if (naechsterIdx < LAYERS.length) {
+          /* Erst den Stand der abgeschlossenen Schicht sichern — sonst
+             stuende sie beim naechsten Oeffnen wieder auf "fast fertig". */
+          save();
+
+          const ansage = uebergangsText(state.layer);
+          log(ansage, 'recap');
+          const uebergang = await Speech.speak(ansage, { voice: 'b' });
+
+          // Waehrend der Ueberleitung gestoppt (Frage, Sprung, Pause)?
+          if (state.gen !== myGen) return;
+          if (uebergang && uebergang.stopped) return;
+
+          state.layer   = naechsterIdx;
+          state.chapter = 0;
+          state.segment = 0;
+
+          /* Die laufende Hoer-Sitzung wird ABSICHTLICH nicht angefasst:
+             sie laeuft ueber den Schichtwechsel hinweg weiter, damit die
+             Abschluss-Zusammenfassung am Ende beide Schichten kennt. */
+          renderKopf(); renderLayers(); renderChapters();
+          renderNow(); save(); updateMediaMeta();
+          continue;
+        }
+
+        /* Letzte vorhandene Schicht — hier gibt es nichts mehr, wohin
+           uebergeleitet werden koennte. Das Skript selbst endet bereits
+           mit einem gesprochenen Schlusswort. */
+        log(schicht().knopf + ' ist durch. Das war alles. Gut gemacht.', 'sys');
+        stopPlay();
+        break;
       }
 
       renderNow();
@@ -429,10 +513,21 @@ const App = (() => {
          dadurch keine Netz-Wartezeit mehr, in der Android die Wiedergabe
          fuer beendet haelt. Kostet kein zusaetzliches Zeichen, es zieht
          denselben Abruf nur zeitlich vor. */
-      const np = naechstePosition(state.chapter, state.segment);
+      const np = naechstePosition(state.layer, state.chapter, state.segment);
       if (np) {
-        const kommt = segmentText(np[0], np[1]);
+        const kommt = segmentTextVon(np[0], np[1], np[2]);
         if (kommt) Speech.prefetch(kommt.text, { voice: kommt.voice });
+
+        /* Fuehrt der naechste Schritt in eine ANDERE Schicht, liegt
+           dazwischen noch die gesprochene Ueberleitung. Die muss ebenfalls
+           vorab bereitliegen — sonst entsteht ausgerechnet an der
+           Nahtstelle die Luecke, an der Android die Hintergrundwiedergabe
+           abraeumt. Kostet kein zusaetzliches Zeichen: der Text ist
+           deterministisch und wird ohnehin genau einmal synthetisiert. */
+        if (np[0] !== state.layer) {
+          const brueckentext = uebergangsText(state.layer);
+          if (brueckentext) Speech.prefetch(brueckentext, { voice: 'b' });
+        }
       }
 
       const res = await Speech.speak(jetzt.text, { voice: jetzt.voice });
@@ -820,6 +915,7 @@ const App = (() => {
     keinTrefferAbschluss:   ['Merken wir uns für später.'],
     andereSchicht:          ['Das gehört nicht hierher, sondern in {schicht} — Stichwort {begriff}.'],
     andereSchichtAbschluss: ['Wenn du magst, wechsel oben die Schicht.'],
+    schichtwechsel:         ['Das war {fertig}. Weiter mit {naechste}, {thema}.'],
     zurueck:                ['Zurück zum Thema: {kapitel}.'],
     wiedereinstieg:         ['Willkommen zurück. Wir waren bei {kapitel} — {kurz}.'],
     sprung:                 ['Weiter bei {kapitel}.'],
