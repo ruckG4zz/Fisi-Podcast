@@ -240,9 +240,60 @@ const Speech = (() => {
      Tastendruck hängt. Kein Dauerlauschen, kein continuous-Modus.
      Hinweis: Chrome verarbeitet das Audio serverseitig (i.d.R. Google).
      --------------------------------------------------------------------- */
+  /**
+   * Fragt den gespeicherten Mikrofon-Berechtigungsstand ab, OHNE eine
+   * Abfrage auszulösen. Nicht jeder Browser kennt das — dann 'unbekannt'.
+   * Rückgabe: 'granted' | 'denied' | 'prompt' | 'unbekannt'
+   */
+  async function micPermission() {
+    try {
+      if (!navigator.permissions || !navigator.permissions.query) return 'unbekannt';
+      const st = await navigator.permissions.query({ name: 'microphone' });
+      return st.state || 'unbekannt';
+    } catch (_) { return 'unbekannt'; }
+  }
+
+  /**
+   * Fordert den Mikrofonzugriff über den regulären Weg an (getUserMedia)
+   * und gibt den Stream sofort wieder frei.
+   *
+   * WARUM DAS NÖTIG IST: Android-Chrome loest die Berechtigungsabfrage bei
+   * SpeechRecognition haeufig NICHT selbst aus. Ohne vorher erteilten
+   * Zugriff scheitert die Erkennung dann still — es passiert schlicht
+   * nichts, und der Nutzer sieht nie eine Abfrage. getUserMedia ist der
+   * zuverlaessige Weg, die Abfrage ueberhaupt erst anzustossen.
+   */
+  async function requestMic() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Dieser Browser bietet keinen Mikrofonzugriff an (getUserMedia fehlt).');
+    }
+    let stream = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      return true;
+    } catch (e) {
+      const n = (e && e.name) || '';
+      if (n === 'NotAllowedError' || n === 'SecurityError') {
+        throw new Error('Mikrofonzugriff abgelehnt oder blockiert. In Chrome: Schloss-Symbol links neben der Adresse → Berechtigungen → Mikrofon → Zulassen. Danach Seite neu laden.');
+      }
+      if (n === 'NotFoundError' || n === 'DevicesNotFoundError') {
+        throw new Error('Kein Mikrofon gefunden.');
+      }
+      if (n === 'NotReadableError') {
+        throw new Error('Das Mikrofon wird gerade von einer anderen App benutzt.');
+      }
+      throw new Error('Mikrofon nicht verfügbar: ' + (n || e.message || 'unbekannter Fehler'));
+    } finally {
+      // Stream sofort freigeben — sonst kann er die Erkennung blockieren.
+      if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch (_) {} }
+    }
+  }
+
   function listen(opts = {}) {
     return new Promise((resolve, reject) => {
       if (!SR) return reject(new Error('Spracherkennung wird von diesem Browser nicht unterstützt.'));
+
+      const status = (s) => { if (opts.onStatus) { try { opts.onStatus(s); } catch (_) {} } };
 
       cancelListen();
       const r = new SR();
@@ -261,6 +312,11 @@ const Speech = (() => {
         fn(arg);
       };
 
+      r.onstart      = () => status('Aufnahme läuft — sprich jetzt.');
+      r.onaudiostart = () => status('Ton wird empfangen.');
+      r.onspeechstart= () => status('Sprache erkannt …');
+      r.onspeechend  = () => status('Sprechpause erkannt, werte aus …');
+
       r.onresult = (ev) => {
         let interim = '';
         for (let i = ev.resultIndex; i < ev.results.length; i++) {
@@ -273,20 +329,34 @@ const Speech = (() => {
 
       r.onerror = (ev) => {
         const map = {
-          'no-speech':    'Ich habe nichts gehört.',
-          'audio-capture':'Kein Mikrofon gefunden.',
-          'not-allowed':  'Mikrofonzugriff wurde nicht erlaubt. Die Seite muss zudem über HTTPS laufen.',
-          'network':      'Die Spracherkennung braucht eine Internetverbindung.',
-          'aborted':      'Abgebrochen.'
+          'no-speech':     'Es kam kein hörbarer Ton an. Sprich etwas lauter und näher ans Mikrofon.',
+          'audio-capture': 'Kein Mikrofon gefunden.',
+          'not-allowed':   'Mikrofonzugriff wurde nicht erlaubt. In Chrome: Schloss-Symbol neben der Adresse → Berechtigungen → Mikrofon → Zulassen, dann Seite neu laden.',
+          'network':       'Die Spracherkennung braucht eine Internetverbindung.',
+          'service-not-allowed': 'Der Spracherkennungsdienst ist auf diesem Gerät nicht verfügbar.',
+          'aborted':       'Abgebrochen.'
         };
-        done(reject, new Error(map[ev.error] || ('Spracherkennungs-Fehler: ' + ev.error)));
+        // Fehlercode immer mitgeben — beim Eingrenzen ist er Gold wert.
+        const msg = (map[ev.error] || 'Spracherkennungs-Fehler') + '  [Code: ' + ev.error + ']';
+        done(reject, new Error(msg));
       };
 
-      r.onend = () => done(resolve, finalText.trim());
+      r.onend = () => { status('Erkennung beendet.'); done(resolve, finalText.trim()); };
 
       recognition = r;
-      try { r.start(); }
-      catch (e) { done(reject, e); }
+
+      /* Erst Berechtigung sicherstellen, DANN starten (siehe requestMic). */
+      status('Frage Mikrofon-Berechtigung an …');
+      requestMic()
+        .then(() => {
+          status('Berechtigung da, starte Erkennung …');
+          try { r.start(); }
+          catch (e) {
+            // "already started" ist harmlos, alles andere zaehlt.
+            if (!/already started/i.test(e.message || '')) done(reject, e);
+          }
+        })
+        .catch(e => done(reject, e));
 
       // Sicherheitsnetz: nie länger als 12 s offen halten.
       setTimeout(() => { if (!settled) { try { r.stop(); } catch (_) {} } }, opts.timeout || 12000);
@@ -306,6 +376,7 @@ const Speech = (() => {
   return {
     init, speak, stop, pause, resume, isPaused, isSpeaking,
     listen, cancelListen, sttSupported, ttsSupported, voiceInfo,
+    micPermission, requestMic, isMobile: () => IS_MOBILE,
     _fixForTTS: fixForTTS   // für Diagnose/Tests
   };
 })();

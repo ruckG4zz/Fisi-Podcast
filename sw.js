@@ -9,7 +9,9 @@
    Die Sprachausgabe (TTS) läuft je nach installierter Stimme lokal.
    ========================================================================== */
 
-const CACHE = 'fisi-podcast-l1-v1';
+/* Cache-Name bei JEDER Änderung an den Dateien hochzählen — sonst liefert
+   der Service Worker hartnäckig die alte Fassung aus. */
+const CACHE = 'fisi-podcast-l1-v2';
 
 const ASSETS = [
   './',

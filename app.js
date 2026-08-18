@@ -212,9 +212,23 @@ const App = (() => {
   /* =====================================================================
      Zwischenfragen
      ===================================================================== */
+  /* Live-Rückmeldung des Mikrofons */
+  function micStatus(text, kind) {
+    el.micbox.hidden = false;
+    el.micStatus.textContent = text;
+    el.micStatus.className = 'mic-status' + (kind ? ' ' + kind : '');
+  }
+
+  function micHeard(text) {
+    const t = (text || '').trim();
+    el.micHeardText.textContent = t || '… noch nichts';
+    el.micHeardText.className = t ? '' : 'empty';
+  }
+
   async function askByVoice() {
     if (!Speech.sttSupported()) {
       log('Dieser Browser kann keine Spracherkennung. Nutz das Textfeld darunter.', 'err');
+      micStatus('Spracherkennung wird von diesem Browser nicht unterstützt.', 'fail');
       el.qtext.focus();
       return;
     }
@@ -224,20 +238,39 @@ const App = (() => {
 
     el.mic.classList.add('listening');
     el.mic.textContent = '🎤  Ich höre …';
-    log('Mikrofon aktiv — stell deine Frage.', 'sys');
+    micHeard('');
+    micStatus('Starte …');
+    log('Mikrofon angefordert.', 'sys');
 
     try {
       const text = await Speech.listen({
-        onInterim: (t) => { el.qtext.value = t; }
+        // Jeder Schritt wird sichtbar — so laesst sich genau sehen,
+        // an welcher Stelle es klemmt (Berechtigung? Ton? Erkennung?).
+        onStatus:  (s) => { micStatus(s); log('Mikro: ' + s, 'sys'); },
+        onInterim: (t) => { micHeard(t); el.qtext.value = t; }
       });
+
       el.mic.classList.remove('listening');
       el.mic.textContent = '🎤  Frage stellen';
-      if (!text) { log('Nichts verstanden.', 'err'); state.busy = false; if (wasPlaying) resumeAfterQuestion(); return; }
+
+      if (!text) {
+        micStatus('Es kam kein verwertbarer Text an.', 'fail');
+        micHeard('');
+        log('Nichts verstanden — es kam kein Text aus der Erkennung zurück.', 'err');
+        state.busy = false;
+        if (wasPlaying) resumeAfterQuestion();
+        return;
+      }
+
+      micStatus('Verstanden.', 'done');
+      micHeard(text);
       el.qtext.value = text;
       await handleQuestion(text, wasPlaying);
+
     } catch (e) {
       el.mic.classList.remove('listening');
       el.mic.textContent = '🎤  Frage stellen';
+      micStatus(e.message || 'Spracherkennung fehlgeschlagen.', 'fail');
       log(e.message || 'Spracherkennung fehlgeschlagen.', 'err');
       state.busy = false;
       if (wasPlaying) resumeAfterQuestion();
@@ -392,7 +425,8 @@ const App = (() => {
   async function init() {
     // DOM einsammeln
     ['play','mic','ask','qtext','chapters','log','bar','nowChapter','nowProgress',
-     'transcript','speaker','source','diag','reset','next','prev']
+     'transcript','speaker','source','diag','reset','next','prev',
+     'micbox','micStatus','micHeardText']
       .forEach(id => el[id] = document.getElementById(id));
 
     el.title = document.getElementById('title');
@@ -404,7 +438,7 @@ const App = (() => {
     // Sprachschicht hochfahren
     try {
       state.voiceInfo = await Speech.init();
-      renderDiag(state.voiceInfo);
+      await renderDiag(state.voiceInfo);
     } catch (e) {
       el.diag.innerHTML = `<span class="bad">${e.message}</span>`;
       log(e.message, 'err');
@@ -456,16 +490,34 @@ const App = (() => {
     }
   }
 
-  function renderDiag(info) {
+  async function renderDiag(info) {
+    const perm = await Speech.micPermission();
+    const permText = {
+      'granted':   'erteilt',
+      'denied':    'BLOCKIERT — in den Seiten-Berechtigungen freigeben',
+      'prompt':    'wird beim ersten Antippen abgefragt',
+      'unbekannt': 'nicht abfragbar (Browser meldet es nicht)'
+    }[perm] || perm;
+
     const rows = [
       ['Stimme A', info.a || '— keine gefunden —'],
       ['Stimme B', info.b || '— keine gefunden —'],
       ['Deutsche Stimmen', info.deutsch + ' von ' + info.total],
-      ['Spracherkennung', info.sttVerfuegbar ? 'verfügbar' : 'nicht verfügbar']
+      ['Spracherkennung', info.sttVerfuegbar ? 'verfügbar' : 'nicht verfügbar'],
+      ['Mikrofon-Berechtigung', permText],
+      ['Sicherer Kontext (HTTPS)', window.isSecureContext ? 'ja' : 'NEIN — Mikro bleibt gesperrt'],
+      ['Gerät', Speech.isMobile() ? 'mobil' : 'Desktop']
     ];
     el.diag.innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+
     if (info.singleVoiceMode) {
       el.diag.innerHTML += `<div class="warn">Nur eine deutsche Stimme installiert. Die beiden Sprecher werden ersatzweise über die Tonhöhe unterschieden — das ersetzt keine echte zweite Stimme.</div>`;
+    }
+    if (perm === 'denied') {
+      el.diag.innerHTML += `<div class="warn">Das Mikrofon ist für diese Seite blockiert. In Chrome: Schloss-Symbol links neben der Adresse → Berechtigungen → Mikrofon → Zulassen. Danach die Seite neu laden.</div>`;
+    }
+    if (!window.isSecureContext) {
+      el.diag.innerHTML += `<div class="warn">Diese Seite läuft nicht in einem sicheren Kontext. Der Browser verweigert dann grundsätzlich den Mikrofonzugriff. Nötig ist HTTPS oder localhost.</div>`;
     }
   }
 
