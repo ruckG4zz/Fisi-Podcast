@@ -31,6 +31,11 @@ const Speech = (() => {
   let recognition   = null;
   let keepAliveTimer = null;
   let currentUtter  = null;
+  /* Zaehler zum Entwerten laufender UND erst geplanter Sprechvorgaenge.
+     Noetig, weil zwischen speak() und dem tatsaechlichen Start eine kurze
+     Verzoegerung liegt (siehe unten) — ein stop() in genau diesem Fenster
+     wuerde sonst wirkungslos verpuffen und die Ausgabe liefe trotzdem los. */
+  let speakGen      = 0;
 
   /* ---------------------------------------------------------------------
      Aussprache-Korrekturen
@@ -175,52 +180,127 @@ const Speech = (() => {
     return new Promise(resolve => {
       if (!synth) return resolve({ stopped: true, error: 'kein TTS' });
 
-      const u = new SpeechSynthesisUtterance(fixForTTS(text));
-      const useB = opts.voice === 'b';
-      const v = useB ? voiceB : voiceA;
-      if (v) u.voice = v;
-      u.lang = (v && v.lang) || 'de-DE';
+      const spoken = fixForTTS(text);
+      const useB   = opts.voice === 'b';
+      const v      = useB ? voiceB : voiceA;
 
-      // Grundtempo etwas ruhiger als Default — Podcast, kein Nachrichtenticker.
-      u.rate   = opts.rate   != null ? opts.rate   : 0.98;
-      u.volume = opts.volume != null ? opts.volume : 1;
+      const myGen    = speakGen;   // wird durch stop() entwertet
+      let done       = false;
+      let retried    = false;
+      let active     = null;   // aktuell laufende Utterance
+      let startTimer = null;
+      let endTimer   = null;
 
-      // Nur eine deutsche Stimme vorhanden? Dann werden die beiden
-      // Sprecher über die Tonhöhe unterscheidbar gemacht (Notbehelf,
-      // ersetzt keine echte zweite Stimme — wird in der UI benannt).
-      if (opts.pitch != null)        u.pitch = opts.pitch;
-      else if (singleVoiceMode)      u.pitch = useB ? 1.18 : 0.88;
-      else                           u.pitch = 1;
+      /* Grosszuegige Obergrenze fuer die Sprechdauer. Deutsche TTS schafft
+         grob 10–14 Zeichen/Sekunde; hier wird bewusst reichlich Luft
+         gelassen, das ist nur ein Notausstieg gegen ewiges Haengen. */
+      const maxDauer = Math.max(20000, Math.round(spoken.length / 8 * 1000) + 15000);
 
-      let done = false;
+      const clearTimers = () => {
+        if (startTimer) { clearTimeout(startTimer); startTimer = null; }
+        if (endTimer)   { clearTimeout(endTimer);   endTimer   = null; }
+      };
+
       const finish = (payload) => {
         if (done) return; done = true;
+        clearTimers();
         stopKeepAlive();
-        if (currentUtter === u) currentUtter = null;
+        if (currentUtter === active) currentUtter = null;
         resolve(payload);
       };
 
-      /* Ob diese Äußerung regulär zu Ende kam, wird an IHR SELBST
-         festgemacht — nicht an einem geteilten Flag. Sonst meldet eine
-         durch cancel() abgeräumte Utterance faelschlich "sauber fertig",
-         und der Player springt ein Segment zu weit. */
-      u.onend   = () => finish({ stopped: currentUtter !== u });
-      u.onerror = (e) => {
-        // 'interrupted'/'canceled' sind normale Folgen von stop() — kein echter Fehler.
-        const benign = e && (e.error === 'interrupted' || e.error === 'canceled');
-        finish({ stopped: true, error: benign ? null : (e && e.error) || 'tts-fehler' });
+      const build = () => {
+        const u = new SpeechSynthesisUtterance(spoken);
+        if (v) u.voice = v;
+        u.lang   = (v && v.lang) || 'de-DE';
+        u.rate   = opts.rate   != null ? opts.rate   : 0.98;
+        u.volume = opts.volume != null ? opts.volume : 1;
+
+        // Nur eine deutsche Stimme vorhanden? Dann werden die beiden
+        // Sprecher über die Tonhöhe unterscheidbar gemacht (Notbehelf,
+        // ersetzt keine echte zweite Stimme — wird in der UI benannt).
+        if (opts.pitch != null)   u.pitch = opts.pitch;
+        else if (singleVoiceMode) u.pitch = useB ? 1.18 : 0.88;
+        else                      u.pitch = 1;
+
+        u.onstart = () => {
+          if (u !== active) return;
+          if (startTimer) { clearTimeout(startTimer); startTimer = null; }
+          // Erst wenn wirklich gesprochen wird, den Ende-Notausstieg scharf schalten.
+          endTimer = setTimeout(() => finish({ stopped: true, error: 'tts-timeout' }), maxDauer);
+        };
+
+        /* Ob diese Äußerung regulär zu Ende kam, wird an IHR SELBST
+           festgemacht — nicht an einem geteilten Flag. Sonst meldet eine
+           durch cancel() abgeräumte Utterance faelschlich "sauber fertig",
+           und der Player springt ein Segment zu weit. */
+        u.onend = () => {
+          if (u !== active) return;          // verworfener Retry-Rest
+          finish({ stopped: currentUtter !== u });
+        };
+        u.onerror = (e) => {
+          if (u !== active) return;
+          // 'interrupted'/'canceled' sind normale Folgen von stop() — kein echter Fehler.
+          const benign = e && (e.error === 'interrupted' || e.error === 'canceled');
+          finish({ stopped: true, error: benign ? null : (e && e.error) || 'tts-fehler' });
+        };
+        return u;
       };
 
-      // Erst die alte Äußerung abräumen, DANN currentUtter umhängen:
-      // so sieht deren onend-Handler noch den alten Wert und meldet korrekt "stopped".
-      if (synth.speaking || synth.pending) synth.cancel();
-      currentUtter = u;
-      synth.speak(u);
-      startKeepAlive();
+      /* -----------------------------------------------------------------
+         Start mit Watchdog.
+
+         CHROME-EIGENHEIT: Ein speak() unmittelbar nach einem cancel() oder
+         direkt nach einer gerade beendeten Äußerung wird gelegentlich
+         KOMPLETT verschluckt — es kommt weder Ton noch onend noch onerror.
+         Ohne Gegenmassnahme haengt die Promise dann fuer immer und der
+         gesamte Ablauf danach (z.B. "Podcast fortsetzen") laeuft nie.
+
+         Deshalb: kommt binnen 1,5 s kein onstart und spricht der Browser
+         auch sonst nicht, wird EINMAL sauber neu angesetzt. Klappt auch
+         das nicht, wird die Promise trotzdem aufgeloest — lieber ein
+         uebersprungener Satz als ein toter Player.
+         ----------------------------------------------------------------- */
+      const launch = () => {
+        if (done) return;
+        // Zwischenzeitlich gestoppt? Dann gar nicht erst losreden.
+        if (myGen !== speakGen) return finish({ stopped: true });
+        active = build();
+        currentUtter = active;
+        try { synth.speak(active); }
+        catch (e) { return finish({ stopped: true, error: 'speak-fehler: ' + (e && e.message) }); }
+        startKeepAlive();
+
+        startTimer = setTimeout(() => {
+          if (done) return;
+          if (myGen !== speakGen) return finish({ stopped: true });
+          if (synth.speaking || synth.pending) return;   // laeuft doch, nur onstart blieb aus
+          if (!retried) {
+            retried = true;
+            try { synth.cancel(); } catch (_) {}
+            setTimeout(launch, 160);
+          } else {
+            finish({ stopped: true, error: 'tts-start-fehlgeschlagen' });
+          }
+        }, 1500);
+      };
+
+      /* Immer eine kurze Atempause vor dem Sprechen: raeumt Reste ab und
+         gibt Chrome Zeit, sich zu sortieren. Klingt im Podcast ohnehin
+         natuerlicher als ein hartes Aneinanderkleben zweier Saetze. */
+      if (synth.speaking || synth.pending) {
+        try { synth.cancel(); } catch (_) {}
+        setTimeout(launch, 200);
+      } else {
+        setTimeout(launch, 80);
+      }
     });
   }
 
   function stop() {
+    // Generation hochzaehlen: entwertet auch Sprechvorgaenge, die noch in
+    // der kurzen Anlaufverzoegerung stecken und sonst trotzdem loslegen wuerden.
+    speakGen++;
     // Referenz ZUERST loesen: der gleich feuernde onend-Handler prueft
     // currentUtter und meldet dadurch korrekt "abgebrochen" statt "fertig".
     currentUtter = null;

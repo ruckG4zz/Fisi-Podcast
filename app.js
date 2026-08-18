@@ -286,54 +286,69 @@ const App = (() => {
     await handleQuestion(text, wasPlaying);
   }
 
+  /* Ergebnis-Behandlung einer Frage.
+     WICHTIG: Egal was hier schiefgeht — am Ende MUSS state.busy geloest
+     und der Podcast fortgesetzt werden, sonst bleibt der Player tot
+     zurueck. Deshalb liegt der ganze Ablauf in try/finally. */
   async function handleQuestion(text, wasPlaying) {
     log('Du: ' + text, 'user');
     state.lastQuestion = text;
-    const r = Matcher.parse(text, PODCAST_L1, REGISTER_L1);
 
-    if (r.type === 'command') {
-      state.busy = false;
-      el.qtext.value = '';
-      switch (r.cmd) {
-        case 'jump':     jumpTo(r.index, 0, true); return;
-        case 'next':     nextChapter(); return;
-        case 'prev':     prevChapter(); return;
-        case 'repeat':   repeatSegment(); return;
-        case 'pause':    log('Pausiert.', 'sys'); return;
-        case 'resume':   startPlay(); return;
-        case 'recap':    await speakRecap('manuell'); if (wasPlaying) startPlay(); return;
-        case 'overview': await speakOverview(); if (wasPlaying) startPlay(); return;
+    let fortsetzen = false;   // im finally ausgewertet
+
+    try {
+      const r = Matcher.parse(text, PODCAST_L1, REGISTER_L1);
+
+      if (r.type === 'command') {
+        el.qtext.value = '';
+        switch (r.cmd) {
+          case 'jump':     jumpTo(r.index, 0, true); return;
+          case 'next':     nextChapter(); return;
+          case 'prev':     prevChapter(); return;
+          case 'repeat':   repeatSegment(); return;
+          case 'pause':    log('Pausiert.', 'sys'); return;
+          case 'resume':   startPlay(); return;
+          case 'recap':    await speakRecap('manuell'); if (wasPlaying) startPlay(); return;
+          case 'overview': await speakOverview();      if (wasPlaying) startPlay(); return;
+        }
+        return;
       }
-      return;
-    }
 
-    if (r.type === 'term') {
-      let antwort = r.entry.antwort;
-      if (r.unsicher) {
-        antwort = `Ich nehme an, du meinst ${r.entry.label}. ` + antwort;
+      if (r.type === 'term') {
+        let antwort = r.entry.antwort;
+        if (r.unsicher) antwort = `Ich nehme an, du meinst ${r.entry.label}. ` + antwort;
+        log('Antwort (' + r.entry.label + '): ' + antwort, 'answer');
+        showSource(r.entry);
+        await Speech.speak(antwort, { voice: 'a' });
+        el.qtext.value = '';
+        fortsetzen = wasPlaying;
+        return;
       }
-      log('Antwort (' + r.entry.label + '): ' + antwort, 'answer');
-      showSource(r.entry);
-      await Speech.speak(antwort, { voice: 'a' });
-      el.qtext.value = '';
-      state.busy = false;
-      if (wasPlaying) resumeAfterQuestion();
-      return;
-    }
 
-    /* Kein Treffer — ehrlich sagen, nichts erfinden. */
-    const fallback = r.reason === 'sprungziel-unklar'
-      ? 'Ich habe verstanden, dass du springen willst, aber nicht wohin. Sag zum Beispiel: spring zu Topologien.'
-      : 'Dazu habe ich in Layer 1 nichts Passendes gefunden. Vielleicht kommt das Thema in einer anderen Schicht vor.';
-    log(fallback, 'err');
-    showNoMatch();
-    await Speech.speak(fallback, { voice: 'a' });
-    state.busy = false;
-    if (wasPlaying) resumeAfterQuestion();
+      /* Kein Treffer — ehrlich sagen, nichts erfinden. */
+      const fallback = r.reason === 'sprungziel-unklar'
+        ? 'Ich habe verstanden, dass du springen willst, aber nicht wohin. Sag zum Beispiel: spring zu Topologien.'
+        : 'Dazu habe ich in Layer 1 nichts Passendes gefunden. Vielleicht kommt das Thema in einer anderen Schicht vor.';
+      log(fallback, 'err');
+      showNoMatch();
+      await Speech.speak(fallback, { voice: 'a' });
+      fortsetzen = wasPlaying;
+
+    } catch (e) {
+      log('Fehler beim Beantworten: ' + (e && e.message), 'err');
+      fortsetzen = wasPlaying;
+    } finally {
+      state.busy = false;
+      if (fortsetzen) resumeAfterQuestion();
+    }
   }
 
+  /* Der Recap ist Beiwerk — wenn er scheitert, MUSS der Podcast trotzdem
+     weiterlaufen. Frueher konnte ein haengender Recap den Player komplett
+     stilllegen. */
   async function resumeAfterQuestion() {
-    await speakRecap('frage');
+    try { await speakRecap('frage'); }
+    catch (e) { log('Recap übersprungen: ' + (e && e.message), 'sys'); }
     startPlay();
   }
 
