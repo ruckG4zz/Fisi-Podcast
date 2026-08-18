@@ -191,22 +191,46 @@ const App = (() => {
   }
 
   /* =====================================================================
-     Recap
+     Moderation & Recap
+     ---------------------------------------------------------------------
+     Die Bausteine kommen aus MODERATION (content-l1.js) und werden zufaellig
+     gewaehlt, damit sich Einwuerfe bei haeufiger Nutzung nicht abnutzen.
+     Sprecher-Logik: B moderiert, A liefert die Fachantwort.
      ===================================================================== */
+  /* Notnagel: sollte content-l1.js mal in einer aelteren Fassung ausgeliefert
+     werden (vergessener Upload, zaeher Cache), faellt die App nicht komplett
+     aus — sie klingt dann nur weniger lebendig. */
+  const MOD = (typeof MODERATION !== 'undefined' && MODERATION) ? MODERATION : {
+    wortmeldung:          ['Wir haben eine Zwischenfrage.'],
+    antwortStart:         ['Klar.'],
+    keinTreffer:          ['Dazu haben wir in Layer eins nichts Passendes.'],
+    keinTrefferAbschluss: ['Merken wir uns für später.'],
+    zurueck:              ['Zurück zum Thema: {kapitel}.'],
+    wiedereinstieg:       ['Willkommen zurück. Wir waren bei {kapitel} — {kurz}.'],
+    sprung:               ['Weiter bei {kapitel}.']
+  };
+
+  function pick(arr) {
+    if (!arr || !arr.length) return '';
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function fuellen(vorlage, werte) {
+    return String(vorlage).replace(/\{(\w+)\}/g, (_, k) => werte[k] != null ? werte[k] : '');
+  }
+
   function recapText(kindOfReturn) {
     const ch = PODCAST_L1.chapters[state.chapter];
-    const pos = `${state.segment + 1} von ${ch.segments.length}`;
     if (kindOfReturn === 'frage') {
-      return `Zurück zum Thema. Wir waren bei Kapitel ${state.chapter + 1}, ${ch.titel}.`;
+      return fuellen(pick(MOD.zurueck), { kapitel: ch.titel });
     }
-    return `Willkommen zurück. Du warst bei Kapitel ${state.chapter + 1}, ${ch.titel}. ` +
-           `Da ging es um: ${ch.kurz}. Wir steigen wieder bei Abschnitt ${pos} ein.`;
+    return fuellen(pick(MOD.wiedereinstieg), { kapitel: ch.titel, kurz: ch.kurz });
   }
 
   async function speakRecap(kind) {
     const t = recapText(kind);
     log(t, 'recap');
-    await Speech.speak(t, { voice: 'b', pitch: 1.02 });
+    await Speech.speak(t, { voice: 'b' });   // Rueckfuehrung ins Thema: immer B
   }
 
   /* =====================================================================
@@ -315,8 +339,16 @@ const App = (() => {
       }
 
       if (r.type === 'term') {
-        let antwort = r.entry.antwort;
-        if (r.unsicher) antwort = `Ich nehme an, du meinst ${r.entry.label}. ` + antwort;
+        /* B kuendigt die Wortmeldung an ... */
+        const ansage = pick(MOD.wortmeldung);
+        log(ansage, 'recap');
+        await Speech.speak(ansage, { voice: 'b' });
+
+        /* ... A antwortet fachlich. */
+        let antwort = pick(MOD.antwortStart) + ' ' + r.entry.antwort;
+        if (r.unsicher) {
+          antwort = `Ich nehme an, du meinst ${r.entry.label}. ` + r.entry.antwort;
+        }
         log('Antwort (' + r.entry.label + '): ' + antwort, 'answer');
         showSource(r.entry);
         await Speech.speak(antwort, { voice: 'a' });
@@ -326,12 +358,26 @@ const App = (() => {
       }
 
       /* Kein Treffer — ehrlich sagen, nichts erfinden. */
-      const fallback = r.reason === 'sprungziel-unklar'
-        ? 'Ich habe verstanden, dass du springen willst, aber nicht wohin. Sag zum Beispiel: spring zu Topologien.'
-        : 'Dazu habe ich in Layer 1 nichts Passendes gefunden. Vielleicht kommt das Thema in einer anderen Schicht vor.';
-      log(fallback, 'err');
+      if (r.reason === 'sprungziel-unklar') {
+        const t = 'Du willst springen, aber ich habe nicht verstanden wohin. Sag zum Beispiel: spring zu Topologien.';
+        log(t, 'err');
+        await Speech.speak(t, { voice: 'b' });
+        fortsetzen = wasPlaying;
+        return;
+      }
+
+      const ansage = pick(MOD.wortmeldung);
+      log(ansage, 'recap');
+      await Speech.speak(ansage, { voice: 'b' });
+
+      const absage = pick(MOD.keinTreffer);
+      log(absage, 'err');
       showNoMatch();
-      await Speech.speak(fallback, { voice: 'a' });
+      await Speech.speak(absage, { voice: 'a' });
+
+      const abschluss = pick(MOD.keinTrefferAbschluss);
+      log(abschluss, 'recap');
+      await Speech.speak(abschluss, { voice: 'b' });
       fortsetzen = wasPlaying;
 
     } catch (e) {
@@ -545,3 +591,4 @@ const App = (() => {
 
   return { state, jumpTo, startPlay, stopPlay };
 })();
+
