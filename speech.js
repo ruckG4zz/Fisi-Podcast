@@ -119,12 +119,25 @@ const Speech = (() => {
 
   /* ---------------------------------------------------------------------
      Chrome-Bug-Workaround: speechSynthesis stoppt lange Utterances nach
-     ca. 15 s. Gegenmittel: regelmäßig pause()+resume() antickern.
+     ca. 15 s. Gegenmittel auf DESKTOP: regelmäßig pause()+resume() antickern.
+
+     WICHTIG: Dieser Trick ist Desktop-Chrome-spezifisch. Auf Android-Chrome
+     bricht ein erzwungenes pause()+resume() die Sprachausgabe nachweislich
+     eher komplett ab, statt sie zu retten (beobachtet: Abbruch nach dem
+     ersten kurzen Segment, exakt im 10s-Timer-Takt). Deshalb läuft der
+     Trick NUR auf Desktop-Browsern; Mobile bleibt bewusst ohne Eingriff,
+     weil dort die 15s-Bugvariante ohnehin nicht in gleicher Form auftritt.
      --------------------------------------------------------------------- */
+  const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+
   function startKeepAlive() {
     stopKeepAlive();
+    if (IS_MOBILE) return;   // auf Mobile bewusst kein Eingriff, siehe oben
     keepAliveTimer = setInterval(() => {
-      if (synth.speaking && !synth.paused) { synth.pause(); synth.resume(); }
+      // Selbstheilend statt erzwingend: nur eingreifen, wenn der Browser
+      // selbst schon pausiert hat (das ist der eigentliche Bugfall).
+      if (synth.paused) { synth.resume(); }
+      else if (synth.speaking) { synth.pause(); synth.resume(); }
     }, 10000);
   }
   function stopKeepAlive() {
