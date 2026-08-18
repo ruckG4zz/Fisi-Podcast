@@ -421,6 +421,22 @@ const App = (() => {
     if (wasPlaying || announce) startPlay();
   }
 
+  /* "Fass mal zusammen" — springt ins Zusammenfassungs-Kapitel der
+     laufenden Schicht.
+     ---------------------------------------------------------------------
+     Jede Schicht hat seit 18.08.2026 ein eigenes Kapitel mit der ID
+     'zusammenfassung'. Es ist bewusst vom Übergang zur nächsten Schicht
+     getrennt, damit es allein anspringbar und allein hörbar ist — etwa
+     als letzte Wiederholung vor einer Prüfung, ohne den ganzen Layer
+     nochmal durchlaufen zu müssen. */
+  function zurZusammenfassung() {
+    const idx = P().chapters.findIndex(c => c.id === 'zusammenfassung');
+    if (idx >= 0) { jumpTo(idx, 0, true); return; }
+    /* Ehrlich statt stumm: kaeme nur vor, wenn eine Inhaltsdatei in einer
+       aelteren Fassung ausgeliefert wurde. */
+    log('Diese Schicht hat kein Zusammenfassungs-Kapitel.', 'err');
+  }
+
   function nextChapter() {
     if (state.chapter + 1 < P().chapters.length) jumpTo(state.chapter + 1, 0, true);
     else log('Das war schon das letzte Kapitel.', 'sys');
@@ -691,6 +707,7 @@ const App = (() => {
           case 'restart':  await kapitelNeu();  return;
           case 'pause':    log('Pausiert.', 'sys'); return;
           case 'resume':   startPlay(); return;
+          case 'summary':  zurZusammenfassung(); return;
           case 'recap':    await speakRecap('manuell'); if (wasPlaying) startPlay(); return;
           case 'overview': await speakOverview();      if (wasPlaying) startPlay(); return;
         }

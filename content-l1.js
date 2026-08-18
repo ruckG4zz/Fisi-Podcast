@@ -346,15 +346,54 @@ const PODCAST_L1 = {
       ]
     },
 
-    /* ---------------------------------------------------------------- 11 */
+    /* ---------------------------------------------------------------- 11
+       ZUSAMMENFASSUNG — eigenes Kapitel, bewusst vom Übergang getrennt.
+
+       NACHGETRAGEN 18.08.2026 auf Wunsch von ruckG4zz: im Piloten war die
+       Kurzübersicht nur ein Dreizeiler, der sofort in die Brücke zur
+       nächsten Schicht überging — als Abschluss hat sich das nicht
+       angefühlt. Jetzt ist es ein eigenständiger, anspringbarer Block
+       ("fass zusammen" / "Zusammenfassung"), der vor einer Prüfung auch
+       allein gehört werden kann.
+
+       Inhalt = ausschliesslich Fakten, die in den Kapiteln davor bereits
+       gesagt wurden. Es kommt nichts Neues dazu, es wird nur verdichtet.
+       Grundlage ist die "Kurzübersicht Layer 1" der Enzyklopädie.
+       ---------------------------------------------------------------- */
     {
-      id: 'fazit',
-      titel: 'Kurzübersicht & Übergang',
-      kurz: 'Zusammenfassung und Brücke zu Schicht 2',
+      id: 'zusammenfassung',
+      titel: 'Zusammenfassung Layer 1',
+      kurz: 'Alles Wichtige auf einen Schlag',
       segments: [
-        { voice: 'a', text: 'Damit haben wir Schicht eins komplett durch. Ziehen wir zusammen, was hängen bleiben sollte.' },
-        { voice: 'b', text: 'Rohe Bits über ein Medium: Kupfer, Lichtwellenleiter oder Funk. Kein Adressbegriff. Geräte sind Hub, Repeater und Medienkonverter.' },
-        { voice: 'a', text: 'Dazu alle Topologie- und Verkabelungsfragen, strukturiert wie integriert. Fragt eine Prüfungsaufgabe nach Primär-, Sekundär- und Tertiärbereich, bist du auf Schicht eins.' },
+        { voice: 'a', text: 'Damit haben wir Schicht eins komplett durch. Nehmen wir uns kurz Zeit und ziehen zusammen, was wirklich hängen bleiben sollte.' },
+        { voice: 'b', text: 'Fangen wir beim Kern an. Die Aufgabe: rohe Bits über ein physisches Medium übertragen. Als elektrische Signale, als Lichtimpulse oder als Funkwellen.' },
+        { voice: 'a', text: 'Und mindestens genauso wichtig, was sie nicht tut: keine Adressen, keine Frames, keine Fehlerkorrektur.' },
+        { voice: 'b', text: 'Dazu der Prüfstein für Zuordnungsaufgaben: Adresse, Anfang und Ende, Fehlererkennung. Taucht eines davon auf, bist du über Schicht eins.' },
+        { voice: 'a', text: 'Die Dateneinheit ist das Bit, im TCP/IP-Modell der Netzzugang, Verbindungstyp Punkt zu Punkt.' },
+        { voice: 'b', text: 'Weiter mit der Ausdehnung. Von klein nach gross: BAN, PAN, LAN und WLAN, CAN, MAN, WAN, GAN.' },
+        { voice: 'a', text: 'Und der eigentliche Merkpunkt dahinter: die Kategorien stecken ineinander. Ein CAN ist eine Handvoll LANs, ein WAN verbindet MANs und CANs.' },
+        { voice: 'b', text: 'Dann die Medien. Bei Kupfer die Kategorien: Cat fünf e ein Gigabit pro Sekunde über hundert Meter.' },
+        { voice: 'a', text: 'Cat sechs schafft zehn Gigabit nur bis etwa siebenunddreissig bis fünfundfünfzig Meter, Cat sechs a die vollen zehn Gigabit über hundert Meter. Das ist die Falle.' },
+        { voice: 'b', text: 'Bei Glasfaser: Multimode mit fünfzig zu hundertfünfundzwanzig Mikrometer bis etwa fünfhundertfünfzig Meter, Singlemode mit neun zu hundertfünfundzwanzig für Kilometer.' },
+        { voice: 'a', text: 'Kleiner Kern, grosse Reichweite. Und die Stecker: RJ45 bei Kupfer, LC, SC und ST bei Glasfaser.' },
+        { voice: 'b', text: 'Die Verkabelung in drei Ebenen. Primärbereich vom Standortverteiler zum Gebäudeverteiler, Singlemode.' },
+        { voice: 'a', text: 'Sekundärbereich vom Gebäudeverteiler zum Etagenverteiler, Cat sechs a oder Multimode. Tertiärbereich vom Etagenverteiler zur Anschlussdose, Cat sechs a.' },
+        { voice: 'b', text: 'Und der Hinweis, der in Prüfungen Gold wert ist: fragt eine Aufgabe nach Primär-, Sekundär- oder Tertiärbereich, bist du garantiert auf Schicht eins.' },
+        { voice: 'a', text: 'Die Übertragungsmodi: Simplex nur in eine Richtung, Halbduplex in beide aber nicht gleichzeitig, Vollduplex in beide gleichzeitig.' },
+        { voice: 'b', text: 'Die Topologien: Bus, Stern, Ring und Mesh — jeweils mit ihren Vor- und Nachteilen und dem typischen Praxisbeispiel.' },
+        { voice: 'a', text: 'Die Geräte dieser Schicht sind Hub, Repeater und Medienkonverter. Alle drei ohne jedes Adressverständnis.' },
+        { voice: 'b', text: 'Und zum Schluss die Fehlerquellen: Kabelbruch und Stecker, wenn gar nichts geht. Dämpfung, Störungen oder ein unterdimensioniertes Kabel, wenn es nur manchmal hakt.' },
+        { voice: 'a', text: 'Das ist Schicht eins. Rohe Bits über ein Medium, kein Adressbegriff, dazu alle Topologie- und Verkabelungsfragen.' },
+        { voice: 'b', text: 'Wenn du das sitzen hast, kannst du weitergehen. Und genau das machen wir jetzt.' }
+      ]
+    },
+
+    /* ---------------------------------------------------------------- 12 */
+    {
+      id: 'uebergang',
+      titel: 'Übergang zu Schicht 2',
+      kurz: 'Was Schicht 1 offen lässt',
+      segments: [
         { voice: 'b', text: 'Dann schlagen wir zum Abschluss die Brücke nach oben. Wir haben jetzt einen Strom aus Bits. Was fehlt daran noch?' },
         { voice: 'a', text: 'Eine ganze Menge. Wo fängt eine Nachricht an, wo hört sie auf? Wer im lokalen Netz hat gesendet, für wen ist sie bestimmt? War die Übertragung überhaupt fehlerfrei?' },
         { voice: 'b', text: 'Und Schicht eins kann davon nichts beantworten.' },

@@ -73,7 +73,28 @@ const Matcher = (() => {
     /* "weiter" allein heisst nach einer Zwischenfrage fast immer
        "spiel weiter", nicht "ueberspring das Kapitel". */
     { cmd: 'resume',   res: [/^\s*(weiter|weiterhoeren|fortsetzen|weiterlesen|mach weiter|weiter gehts|fortfahren)\s*$/] },
-    { cmd: 'recap',    res: [/\b(wo (bin|sind|waren) (ich|wir)|recap|zusammenfassung|zusammenfassen|worueber reden wir|wo waren wir)\b/] },
+    /* SPRUNG INS ZUSAMMENFASSUNGS-KAPITEL — muss VOR 'recap' stehen.
+       -------------------------------------------------------------------
+       Bis 18.08.2026 lagen "zusammenfassung" und "zusammenfassen" im
+       recap-Befehl. Der macht aber etwas ganz anderes: er sagt nur in
+       einem Satz, wo man gerade steht ("Wir waren bei Topologien").
+
+       Seit jede Schicht ein eigenes Kapitel "Zusammenfassung" hat, ist
+       das die falsche Zuordnung: wer "fass mal zusammen" sagt, will den
+       Merkblock hören, nicht wissen, in welchem Kapitel er sitzt.
+       Deshalb ein eigener Befehl, und recap behaelt nur noch die
+       Wo-bin-ich-Formulierungen. */
+    { cmd: 'summary',  res: [
+        /\b(zusammenfassung|zusammenfassen|zusammengefasst)\b/,
+        /* Getrenntes "fass ... zusammen": im Deutschen steht zwischen Verb
+           und Praefix fast immer noch etwas ("fass mal zusammen", "fass das
+           kurz zusammen"). Deshalb ein Fenster dazwischen statt einer
+           festen Wortfolge — sonst greift genau die Formulierung nicht,
+           die man tatsaechlich sagt. */
+        /\bfass(e|t)?\b.{0,25}\bzusammen\b/,
+        /\b(kurzuebersicht|das wichtigste|wichtigste nochmal|merkblock)\b/
+      ] },
+    { cmd: 'recap',    res: [/\b(wo (bin|sind|waren) (ich|wir)|recap|worueber reden wir|wo waren wir)\b/] },
     { cmd: 'overview', res: [/\b(inhaltsverzeichnis|uebersicht|welche kapitel|was kommt noch|kapitelliste)\b/] }
   ];
 

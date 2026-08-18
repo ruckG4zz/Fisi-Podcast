@@ -48,6 +48,14 @@ const PODCAST_L3 = {
       kurz: 'Warum ein Frame nicht weit genug kommt',
       segments: [
         { voice: 'a', text: 'Schicht drei, die Vermittlungsschicht. Und wieder starten wir mit dem, was von unten ankommt.' },
+        /* RÜCKBLICK auf die vorherigen Schichten — nachgetragen 18.08.2026.
+           Inhalt entspricht den Zeilen "Rückblick Layer 2" und "Rückblick
+           Layer 1" aus der Enzyklopädie. Bewusst zwei Sätze, keine
+           Wiederholung des Stoffs. */
+        { voice: 'b', text: 'Vorher ganz kurz der Rückblick, damit wir auf demselben Stand starten.' },
+        { voice: 'a', text: 'Schicht zwei brachte die MAC-Adressierung, die CAM-Tabelle im Switch, CSMA/CD gegen CSMA/CA, VLAN und Trunking, Spanning Tree mit der Root Bridge und den Unterschied zwischen Broadcast- und Kollisionsdomäne.' },
+        { voice: 'b', text: 'Und Schicht eins darunter: Bits über ein Medium, Hub und Repeater, Topologien und Verkabelung.' },
+        { voice: 'a', text: 'Zwei Sätze, zwei Schichten. Damit kannst du hier einsteigen.' },
         { voice: 'b', text: 'Aus Schicht zwei kommt ein sauber abgegrenzter Frame, mit Absender- und Ziel-MAC-Adresse.' },
         { voice: 'a', text: 'Womit wir jedes Gerät erreichen. Allerdings nur innerhalb desselben lokalen Netzes.' },
         { voice: 'b', text: 'Und der Grund dafür ist wichtig: MAC-Adressen sind nicht routbar. Ein Switch kennt nur sein eigenes Segment.' },
@@ -564,20 +572,63 @@ const PODCAST_L3 = {
       ]
     },
 
-    /* ---------------------------------------------------------------- 20 */
+    /* ---------------------------------------------------------------- 20
+       ZUSAMMENFASSUNG — eigenes Kapitel, getrennt vom Übergang.
+       Siehe Begründung im gleichnamigen Kapitel von content-l1.js.
+       Grundlage: "Kurzübersicht Layer 3" der Enzyklopädie. Weil Schicht 3
+       das prüfungsträchtigste Kapitel ist, ist dieser Block bewusst der
+       ausführlichste der drei — er soll vor einer Prüfung allein tragen.
+       ---------------------------------------------------------------- */
     {
-      id: 'fazit',
-      titel: 'Kurzübersicht & Übergang',
-      kurz: 'Zusammenfassung und Brücke zu Schicht 4',
+      id: 'zusammenfassung',
+      titel: 'Zusammenfassung Layer 3',
+      kurz: 'Alles Wichtige auf einen Schlag',
       segments: [
-        { voice: 'b', text: 'Damit ist Schicht drei durch. Und das war die längste Etappe bisher, also fassen wir sorgfältig zusammen.' },
-        { voice: 'a', text: 'IP-Adressierung in Version vier und sechs, Subnetting und VLSM, dazu ARP und NDP.' },
-        { voice: 'b', text: 'Routing mit allem, was dazugehört: statisch und dynamisch, OSPF, BGP und RIP, Default Gateway, Metrik, Administrative Distance und Summarization.' },
-        { voice: 'a', text: 'Dann NAT und PAT, ICMP und IGMP, die vier Adressierungsarten Unicast, Broadcast, Multicast und Anycast.' },
-        { voice: 'b', text: 'Und der Sicherheitsteil: IPsec mit AH und ESP sowie Transport- und Tunnel-Modus, VPN mit Site-to-Site und End-to-Site und die beiden Tunneling-Arten.' },
-        { voice: 'a', text: 'Dazu Firewall-Grundlagen, RDP mit dem RD Gateway, Thin und Zero Client und die symmetrische wie asymmetrische Verschlüsselung.' },
-        { voice: 'b', text: 'Zur Einordnung nochmal der Rückblick: Schicht zwei war MAC-Adressierung, CAM-Tabelle, CSMA/CD gegen CSMA/CA, VLAN und Trunking, Spanning Tree mit Root Bridge, Broadcast- gegen Kollisionsdomäne.' },
-        { voice: 'a', text: 'Und Schicht eins waren Bits über ein Medium, Hub und Repeater, Topologien und Verkabelung.' },
+        { voice: 'b', text: 'Damit ist Schicht drei durch. Das war die längste Etappe bisher, also nehmen wir uns für die Zusammenfassung auch die Zeit.' },
+        { voice: 'a', text: 'Die Aufgabe in zwei Begriffen: logische Adressierung über IP-Adressen, und Routing über Netzgrenzen hinweg.' },
+        { voice: 'b', text: 'Die IPv4-Adresse: zweiunddreissig Bit in vier Oktetten zu je acht Bit, jedes Oktett null bis 255.' },
+        { voice: 'a', text: 'Die Klassen: A eins bis 126, B 128 bis 191, C 192 bis 223, D ab 224 für Multicast, E ab 240 reserviert.' },
+        { voice: 'b', text: 'Die privaten Bereiche nach RFC 1918: 10.0.0.0 mit Prefix acht, 172.16.0.0 mit Prefix zwölf, 192.168.0.0 mit Prefix sechzehn. Nicht im Internet routbar.' },
+        { voice: 'a', text: 'Und 169.254.0.0 mit Prefix sechzehn ist APIPA — kein privater Bereich, sondern das Signal, dass kein DHCP-Server antwortet.' },
+        { voice: 'b', text: 'Der Prefix sagt, wie viele Bit von links zum Netzanteil gehören. Prefix vierundzwanzig und die Maske 255.255.255.0 sind dasselbe in zwei Schreibweisen.' },
+        { voice: 'a', text: 'Die Hostformel: zwei hoch zweiunddreissig minus Prefix, davon zwei abziehen für Netz- und Broadcast-Adresse.' },
+        { voice: 'b', text: 'Die wichtigsten Werte: Prefix vierundzwanzig 254 Hosts, fünfundzwanzig 126, sechsundzwanzig 62, siebenundzwanzig 30, achtundzwanzig 14, neunundzwanzig 6, dreissig 2.' },
+        { voice: 'a', text: 'Und die Merkregel fürs Kopfrechnen: 256 minus letzter Maskenwert ergibt die Blockgrösse.' },
+        { voice: 'b', text: 'VLSM passt die Maske pro Teilnetz an den echten Bedarf an. Grundregel: immer das grösste Subnetz zuerst vergeben.' },
+        { voice: 'a', text: 'IPv6: 128 Bit in acht Gruppen zu je sechzehn Bit, hexadezimal. Führende Nullen dürfen weg, eine Nullfolge einmalig durch den doppelten Doppelpunkt ersetzt.' },
+        { voice: 'b', text: 'Standard-Prefix im LAN ist vierundsechzig. Und der Satz, der sicher drankommt: IPv6 kennt kein Broadcast mehr, das übernimmt Multicast.' },
+        { voice: 'a', text: 'ARP löst bei IPv4 eine IP-Adresse in eine MAC-Adresse auf: Broadcast hin, Unicast zurück, Ergebnis in den ARP-Cache.' },
+        { voice: 'b', text: 'Bei IPv6 macht das NDP über ICMPv6 und kann zusätzlich Router-Erkennung und automatische Adressvergabe.' },
+        { voice: 'a', text: 'Die vier Adressierungsarten: Unicast an genau einen, Broadcast an alle im Segment, Multicast an eine angemeldete Gruppe, Anycast an den nächstgelegenen von mehreren.' },
+        { voice: 'b', text: 'ICMP ist Diagnose direkt über IP, ohne Port. Echo Request Typ acht, Echo Reply Typ null. IGMP verwaltet die Multicast-Gruppen.' },
+        { voice: 'a', text: 'Die TTL verhindert endlos kreisende Pakete — und ist gleichzeitig die Grundlage von Traceroute.' },
+        { voice: 'b', text: 'Beim Routing gilt Longest Prefix Match: der spezifischste Eintrag gewinnt.' },
+        { voice: 'a', text: 'Die Protokolle: RIP mit Hopcount und maximal fünfzehn Hops, OSPF als Link-State innerhalb eines autonomen Systems, BGP als Pfadvektor zwischen autonomen Systemen.' },
+        { voice: 'b', text: 'Das Default Gateway nimmt alles, was nicht ins eigene Subnetz gehört. Fehlt es, geht nur noch das eigene Subnetz.' },
+        { voice: 'a', text: 'Metrik und Administrative Distance entscheiden, welcher Weg und welche Quelle gewinnt — bei beiden gilt: niedriger ist besser.' },
+        { voice: 'b', text: 'NAT übersetzt privat nach öffentlich. PAT ist die Variante, bei der sich viele eine öffentliche Adresse über Portnummern teilen — der Heimrouter-Fall.' },
+        { voice: 'a', text: 'Die Geräte: Router, Layer-3-Switch und die Paketfilter-Firewall. Der Layer-3-Switch ersetzt den normalen Switch nicht, er ergänzt ihn um Routing.' },
+        { voice: 'b', text: 'IPsec sichert IP-Pakete auf dieser Schicht. Der Authentication Header macht Integrität und Authentizität ohne Verschlüsselung, ESP verschlüsselt — und ist der Regelfall.' },
+        { voice: 'a', text: 'Transport-Modus schützt nur die Nutzdaten, Tunnel-Modus kapselt das komplette Paket in ein neues. Tunnel ist der Standard bei Site-to-Site.' },
+        { voice: 'b', text: 'Beim VPN die drei Sicherheitsziele: Vertraulichkeit durch Verschlüsselung, Integrität durch Prüfsumme, Authentizität durch Zertifikat oder Signatur.' },
+        { voice: 'a', text: 'Site-to-Site verbindet zwei Standorte über ihre Gateways, End-to-Site ein einzelnes Gerät. Full Tunneling schickt alles durch den Tunnel, Split Tunneling nur den Firmenverkehr.' },
+        { voice: 'b', text: 'Die Firewall in drei Stufen: Paketfilter ohne Gedächtnis, Stateful Inspection mit Verbindungszustand, Next-Generation zusätzlich mit Blick in den Inhalt.' },
+        { voice: 'a', text: 'RDP überträgt Bildschirm und Eingaben, das RD Gateway kapselt es in HTTPS über Port 443 — ohne separates VPN.' },
+        { voice: 'b', text: 'Thin Client mit schlankem eigenem System, Zero Client ganz ohne. Beide legen Rechenleistung und Daten auf den Server.' },
+        { voice: 'a', text: 'Und die Verschlüsselung: symmetrisch ist schnell, hat aber das Austauschproblem. Asymmetrisch löst genau das, ist dafür rechenintensiver.' },
+        { voice: 'b', text: 'Deshalb kombiniert die Praxis beides: asymmetrisch einigt man sich auf den Schlüssel, symmetrisch laufen die Daten.' },
+        { voice: 'a', text: 'Zum Schluss die Fehlerquellen: falsche Subnetzmaske, fehlendes Default Gateway, IP-Adresskonflikt, Routing-Fehler, falsches NAT, ARP-Probleme und MTU-Probleme.' },
+        { voice: 'b', text: 'Und das charakteristischste Fehlerbild von allen: eigenes Subnetz geht, alles darüber hinaus nicht. Dann fehlt das Gateway.' },
+        { voice: 'a', text: 'Das ist Schicht drei. Das dickste Brett — und das mit Abstand prüfungsträchtigste.' }
+      ]
+    },
+
+    /* ---------------------------------------------------------------- 21 */
+    {
+      id: 'uebergang',
+      titel: 'Übergang zu Schicht 4',
+      kurz: 'Vom Weg zum richtigen Dienst',
+      segments: [
         { voice: 'b', text: 'Dann schlagen wir die Brücke nach oben. Mit IP-Adressen und Routing findet das Paket seinen Weg über beliebig viele Netze bis zum Zielgerät.' },
         { voice: 'a', text: 'Aber damit steht nur fest, welches Gerät gemeint ist.' },
         { voice: 'b', text: 'Und nicht, welche der vielen laufenden Anwendungen darauf die Daten bekommen soll.' },

@@ -50,6 +50,15 @@ const PODCAST_L2 = {
       kurz: 'Was Schicht 1 offen gelassen hat',
       segments: [
         { voice: 'b', text: 'Wir sind eine Etage höher gerutscht. Schicht zwei, die Sicherungsschicht.' },
+        /* RÜCKBLICK auf die vorherige Schicht — nachgetragen 18.08.2026 auf
+           Wunsch von ruckG4zz. Bewusst kurz und knackig: es ist eine
+           Reorientierung für den Fall, dass Schicht eins schon eine Weile
+           her ist, kein zweiter Durchgang. Inhalt entspricht der Zeile
+           "Rückblick Layer 1" aus der Enzyklopädie. */
+        { voice: 'a', text: 'Bevor wir einsteigen, ganz kurz der Rückblick nach unten. Falls Schicht eins schon eine Weile her ist.' },
+        { voice: 'b', text: 'Dort ging es um rohe Bits über ein Medium: Kupfer, Lichtwellenleiter oder Funk. Ohne jeden Adressbegriff.' },
+        { voice: 'a', text: 'Die Geräte waren Hub, Repeater und Medienkonverter. Dazu gehörten die Topologien und die strukturierte Verkabelung.' },
+        { voice: 'b', text: 'Das reicht auch schon als Grundlage. Mehr brauchst du nicht, um hier einzusteigen.' },
         { voice: 'a', text: 'Und wir starten genau da, wo Schicht eins aufgehört hat. Was kommt von unten bei uns an?' },
         { voice: 'b', text: 'Eine lückenlose Folge aus Nullen und Einsen. Kein Anfang, kein Ende, keine Adressen.' },
         { voice: 'a', text: 'Damit lässt sich noch nichts anfangen. Genau die Frage löst diese Schicht als Erstes: wo beginnt und endet eine Nachricht, und für wen im lokalen Netz ist sie bestimmt.' },
@@ -439,17 +448,50 @@ const PODCAST_L2 = {
       ]
     },
 
-    /* ---------------------------------------------------------------- 15 */
+    /* ---------------------------------------------------------------- 15
+       ZUSAMMENFASSUNG — eigenes Kapitel, getrennt vom Übergang.
+       Siehe Begründung im gleichnamigen Kapitel von content-l1.js.
+       Grundlage: "Kurzübersicht Layer 2" der Enzyklopädie, verdichtet aus
+       Fakten, die in den Kapiteln davor bereits gesagt wurden.
+       ---------------------------------------------------------------- */
     {
-      id: 'fazit',
-      titel: 'Kurzübersicht & Übergang',
-      kurz: 'Zusammenfassung und Brücke zu Schicht 3',
+      id: 'zusammenfassung',
+      titel: 'Zusammenfassung Layer 2',
+      kurz: 'Alles Wichtige auf einen Schlag',
       segments: [
-        { voice: 'a', text: 'Damit haben wir Schicht zwei durch. Ziehen wir zusammen, was hängen bleiben sollte.' },
-        { voice: 'b', text: 'MAC-Adressierung, Frame-Aufbau, die Switch-Arbeitsweise mit der CAM-Tabelle und die Zugriffsverfahren CSMA/CD und CSMA/CA.' },
-        { voice: 'a', text: 'Dazu VLAN nach 802.1Q, Spanning Tree nach 802.1D und RSTP nach 802.1w mit Root Bridge und Portrollen.' },
-        { voice: 'b', text: 'Und der Unterschied zwischen Broadcast- und Kollisionsdomäne, Port Security, MAC Flooding und die Paketanalyse mit Wireshark.' },
-        { voice: 'a', text: 'Zum Vergleich der Rückblick nach unten: Schicht eins waren rohe Bits über ein Medium, kein Adressbegriff, Geräte Hub, Repeater und Medienkonverter, dazu Topologien und Verkabelung.' },
+        { voice: 'a', text: 'Damit haben wir Schicht zwei durch. Nehmen wir uns kurz Zeit und ziehen zusammen, was hängen bleiben sollte.' },
+        { voice: 'b', text: 'Die vier Aufgaben zuerst: Geräte im lokalen Netz über die MAC-Adresse adressieren, Bits in Frames verpacken, Übertragungsfehler erkennen und den Medienzugriff regeln.' },
+        { voice: 'a', text: 'Und die Feinheit, die Punkte bringt: Fehler erkennen ja, Fehler korrigieren nein. Ein fehlerhafter Frame wird verworfen, nicht repariert.' },
+        { voice: 'b', text: 'Die MAC-Adresse: achtundvierzig Bit, also sechs Byte, hexadezimal. Erste drei Byte OUI als Herstellerkennung, letzte drei Byte Seriennummer.' },
+        { voice: 'a', text: 'Eingebrannt, aber per Spoofing überschreibbar. Und sechsmal FF ist die Broadcast-MAC für alle Geräte im Segment.' },
+        { voice: 'b', text: 'Der Frame-Aufbau: Präambel sieben Byte, Start Frame Delimiter ein Byte, Ziel- und Quell-MAC je sechs Byte, Typfeld zwei Byte, Nutzdaten sechsundvierzig bis fünfzehnhundert, FCS vier Byte.' },
+        { voice: 'a', text: 'Die Zahlen dazu: minimal vierundsechzig Byte, maximal fünfzehnhundertachtzehn, mit VLAN-Tag fünfzehnhundertzweiundzwanzig. MTU fünfzehnhundert.' },
+        { voice: 'b', text: 'Der Switch lernt MAC-Adressen in der CAM-Tabelle. Drei Grundverhalten: Flooding bei unbekanntem Ziel, Forwarding bei bekanntem, Filtering im selben Port-Segment.' },
+        { voice: 'a', text: 'Der Hub dagegen hat kein Adressverständnis, flutet immer, hat eine gemeinsame Kollisionsdomäne und kann nur Halbduplex.' },
+        { voice: 'b', text: 'Die Zugriffsverfahren: CSMA/CD mit Kollisionserkennung im klassischen Ethernet, CSMA/CA mit Kollisionsvermeidung im WLAN.' },
+        { voice: 'a', text: 'Bei den Standards: 802.1Q ist VLAN, 802.1D ist Spanning Tree, 802.1w ist Rapid Spanning Tree, 802.1X ist portbasierte Authentifizierung.' },
+        { voice: 'b', text: 'Und 802.3 ist Ethernet, 802.11 ist WLAN. Merkregel: die 802.1er regeln Verhalten, die anderen beiden je ein komplettes Medium.' },
+        { voice: 'a', text: 'VLAN trennt ein physisches Netz logisch in mehrere Broadcast-Domänen. Access-Port ungetaggt für Endgeräte, Trunk-Port getaggt zwischen Switches.' },
+        { voice: 'b', text: 'Und das Native VLAN muss auf beiden Seiten eines Trunks gleich sein, sonst drohen Fehlzustellungen oder VLAN-Hopping.' },
+        { voice: 'a', text: 'Spanning Tree verhindert Schleifen. Root Bridge ist der Switch mit der niedrigsten Bridge-ID, bei gleicher Priorität entscheidet die niedrigere MAC-Adresse.' },
+        { voice: 'b', text: 'Portrollen: Root Port zur Root Bridge, Designated Port am Segment, Blocked Port als blockierte Reserve. Und die Root Bridge selbst hat keinen Root Port.' },
+        { voice: 'a', text: 'Konvergenz bei STP dreissig bis fünfzig Sekunden, bei RSTP meist wenige Sekunden.' },
+        { voice: 'b', text: 'Beim WLAN: Access Point und SSID, die drei Bänder mit zwei Komma vier, fünf und sechs Gigahertz.' },
+        { voice: 'a', text: 'Und die Verschlüsselungsreihe: WEP mit RC4 gebrochen, WPA mit TKIP unsicher, WPA2 mit AES über CCMP als Mindeststandard, WPA3 mit SAE statt Handschlag.' },
+        { voice: 'b', text: 'Dann der Klassiker, der ständig verwechselt wird: ein Switch trennt Kollisionsdomänen, aber nicht automatisch Broadcast-Domänen.' },
+        { voice: 'a', text: 'Dafür braucht es VLANs oder einen Router. Diese Frage kommt genau so.' },
+        { voice: 'b', text: 'Zum Schluss die Sicherheit: MAC Flooding überfüllt die CAM-Tabelle, bis der Switch wie ein Hub flutet. Port Security begrenzt die erlaubten MAC-Adressen pro Port.' },
+        { voice: 'a', text: 'Und die Fehlerquellen: Duplex-Mismatch, Broadcast-Sturm, VLAN-Fehlkonfiguration, MAC-Adresskonflikt, CAM-Table-Overflow und eine fehlerhafte FCS.' },
+        { voice: 'b', text: 'Dazu Wireshark als Werkzeug, um sich das alles an echten Paketen anzusehen. Das ist Schicht zwei.' }
+      ]
+    },
+
+    /* ---------------------------------------------------------------- 16 */
+    {
+      id: 'uebergang',
+      titel: 'Übergang zu Schicht 3',
+      kurz: 'Warum MAC-Adressen nicht weit genug reichen',
+      segments: [
         { voice: 'b', text: 'Ein Protokoll haben wir bewusst ausgelassen, und das sollten wir ansagen: ARP.' },
         { voice: 'a', text: 'Das Address Resolution Protocol verbindet MAC- und IP-Adressen. Wir behandeln es ausführlich in Schicht drei, weil es IP-Adressen voraussetzt.' },
         { voice: 'b', text: 'Was ein guter Übergang ist. Wir erreichen jetzt jedes Gerät — aber nur innerhalb desselben lokalen Netzes.' },

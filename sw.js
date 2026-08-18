@@ -16,7 +16,7 @@
 
 /* Cache-Name bei JEDER Änderung an den Dateien hochzählen — sonst liefert
    der Service Worker hartnäckig die alte Fassung aus. */
-const CACHE = 'fisi-podcast-l1-v9';
+const CACHE = 'fisi-podcast-l1-v10';
 
 const ASSETS = [
   './',
