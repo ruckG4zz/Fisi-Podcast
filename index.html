@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>FISI-Podcast · NEINT1 Layer 1</title>
+<title>FISI-Podcast · NEINT1 Layer 1–3</title>
 <meta name="theme-color" content="#0b1116">
-<meta name="description" content="Hörfassung der NEINT1-Enzyklopädie, Layer 1 — Bitübertragungsschicht.">
+<meta name="description" content="Hörfassung der NEINT1-Enzyklopädie: Layer 1 Bitübertragung, Layer 2 Sicherung, Layer 3 Vermittlung.">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -158,6 +158,16 @@ select:focus{outline:none;border-color:var(--accent-dim)}
 .resume p{margin:0 0 12px;font-size:.92rem}
 .resume .controls{margin-top:0}
 
+/* --- Schicht-Umschalter --- */
+.layers{display:flex;gap:8px;flex-wrap:wrap}
+.layer{flex:1;min-width:96px;display:flex;flex-direction:column;align-items:flex-start;
+  gap:2px;padding:10px 12px;background:var(--bg3);border:1px solid var(--line);
+  border-radius:10px;text-align:left}
+.layer b{font-size:.92rem;font-weight:650}
+.layer em{font-style:normal;font-size:.74rem;color:var(--fg-dim)}
+.layer.active{border-color:var(--accent);background:#14232b}
+.layer.active b{color:var(--accent)}
+
 /* --- Kapitel --- */
 .chapters{display:flex;flex-direction:column;gap:6px}
 .chapter{display:flex;align-items:flex-start;gap:11px;text-align:left;width:100%;
@@ -207,10 +217,22 @@ footer a{color:var(--accent-dim)}
 <div class="wrap">
 
   <header>
-    <div class="badge">NEINT1 · Pilot</div>
+    <div class="badge">NEINT1 · Layer 1–3</div>
     <h1 id="title">Layer 1</h1>
     <p class="sub" id="subtitle"></p>
   </header>
+
+  <!-- Schicht wählen -->
+  <div class="card">
+    <h2>Schicht</h2>
+    <div class="layers" id="layers"></div>
+    <div class="hint">
+      Jede Schicht hat ihren <strong>eigenen</strong> gespeicherten Hörstand —
+      ein Wechsel verliert nichts. Fragen werden immer gegen die gerade
+      laufende Schicht beantwortet; liegt der Begriff in einer anderen,
+      kommt ein Hinweis statt einer Antwort aus dem falschen Kapitel.
+    </div>
+  </div>
 
   <!-- Wiedereinstieg -->
   <div class="resume" id="resumeBox" hidden>
@@ -259,8 +281,9 @@ footer a{color:var(--accent-dim)}
     </div>
     <div class="hint">
       Das Mikrofon läuft <strong>nur</strong> solange du den Knopf gedrückt hast — kein Dauerlauschen.<br>
-      Befehle: <code>spring zu Topologien</code> · <code>weiter</code> · <code>zurück</code> ·
-      <code>nochmal</code> · <code>wo bin ich</code> · <code>Übersicht</code>
+      Befehle: <code>spring zu …</code> (Kapitelname der laufenden Schicht) ·
+      <code>weiter</code> · <code>zurück</code> ·
+      <code>nochmal</code> · <code>von vorn</code> · <code>wo bin ich</code> · <code>Übersicht</code>
     </div>
     <div class="source" id="source" hidden></div>
   </div>
@@ -309,15 +332,18 @@ footer a{color:var(--accent-dim)}
         <label>Stimme A <span class="vhint">männlich · Chirp3-HD</span>
           <select id="voiceA"></select>
         </label>
-        <label>Stimme B <span class="vhint">weiblich · Studio</span>
+        <label>Stimme B <span class="vhint">weiblich · Chirp3-HD</span>
           <select id="voiceB"></select>
         </label>
       </div>
       <div class="src-note">
         Beide Stimmen teilen sich Erklären und Nachfragen — die Rollen sind
-        nicht fest verteilt. Hinweis zum Kontingent: Studio-Stimmen haben
-        100.000 Zeichen/Monat im dauerhaften Gratis-Anteil, Chirp3 dagegen
-        1 Mio. Angezeigt wird unten immer das knappere der beiden.
+        nicht fest verteilt. <strong>Voreinstellung sind bewusst zwei
+        Chirp3-HD-Stimmen</strong> (Enceladus und Achernar), damit die beiden
+        Sprecher über alle Schichten hinweg dieselben bleiben. Kontingent:
+        Chirp3 hat 1 Mio. Zeichen/Monat im dauerhaften Gratis-Anteil,
+        Studio-Stimmen nur 100.000. Angezeigt wird unten immer das knappere
+        der beiden gewählten.
       </div>
       <div class="controls">
         <button id="voiceLoad">Stimmen von Google laden</button>
@@ -343,14 +369,16 @@ footer a{color:var(--accent-dim)}
   </div>
 
   <footer>
-    Faktenquelle: NEINT1-OSI-Enzyklopädie (FINAL), Section <code>sec-l1</code>.<br>
+    Faktenquelle der laufenden Schicht: <code id="quelle">—</code><br>
     Hörfassung, kein erfundener Inhalt. Sprachausgabe ausschließlich Google Cloud TTS.<br>
-    Erstellt und geprüft durch Claude Opus 4.1 · v1.2
+    Erstellt und geprüft durch Claude Opus 4.1 · v2.0 (Layer 1–3)
   </footer>
 
 </div>
 
 <script src="content-l1.js"></script>
+<script src="content-l2.js"></script>
+<script src="content-l3.js"></script>
 <script src="matcher.js"></script>
 <script src="cloud-tts.js"></script>
 <script src="speech.js"></script>

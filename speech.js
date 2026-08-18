@@ -76,6 +76,74 @@ const Speech = (() => {
     [/\bMAC\b/g,        'Mac'],
     [/\bTCP\/IP\b/g,    'T-C-P I-P'],
     [/\bOSI\b/g,        'O-S-I'],
+
+    /* ---------------------------------------------------------------
+       LAYER 2 (Sicherungsschicht) — Abkuerzungen, die eine deutsche
+       Stimme sonst als Kunstwort verschluckt.
+
+       BEWUSST NICHT AUFGENOMMEN, weil sie im Deutschen als Wort
+       gesprochen werden und moderne Stimmen das von selbst treffen:
+       LAN, WLAN, VLAN-Bestandteil "LAN", CAM, WEP, TKIP, ARP, NAT, PAT,
+       RIP, APIPA, SLAAC. Eine "Korrektur" auf Verdacht wuerde diese
+       Faelle eher verschlechtern — dieselbe Linie wie bei ENGLISCH_FIX.
+       --------------------------------------------------------------- */
+    [/\bVLAN\b/g,       'V-LAN'],
+    /* "STP" steht schon weiter oben (dort fuer Shielded Twisted Pair aus
+       Layer 1). Die Regel dort greift NICHT in "RSTP", weil davor ein
+       Wortzeichen steht — die Wortgrenze rettet uns hier. */
+    [/\bRSTP\b/g,       'R-S-T-P'],
+    [/\bBPDU\b/g,       'B-P-D-U'],
+    [/\bFCS\b/g,        'F-C-S'],
+    [/\bCRC\b/g,        'C-R-C'],
+    [/\bOUI\b/g,        'O-U-I'],
+    [/\bSFD\b/g,        'S-F-D'],
+    [/\bMTU\b/g,        'M-T-U'],
+    [/\bSSID\b/g,       'S-S-I-D'],
+    [/\bWPA3\b/g,       'W-P-A drei'],    // vor WPA
+    [/\bWPA2\b/g,       'W-P-A zwei'],
+    [/\bWPA\b/g,        'W-P-A'],
+    [/\bAES\b/g,        'A-E-S'],
+    [/\bCCMP\b/g,       'C-C-M-P'],
+    [/\bGCMP\b/g,       'G-C-M-P'],
+    [/\bSAE\b/g,        'S-A-E'],
+    [/\bRTS\/CTS\b/g,   'R-T-S C-T-S'],
+    [/\bASCII\b/g,      'Aski'],
+
+    /* ---------------------------------------------------------------
+       LAYER 3 (Vermittlungsschicht)
+       Reihenfolge ist hier bedeutungstragend: die langen IP-Varianten
+       muessen VOR dem blossen "IP" stehen, und "IP" selbst muss NACH
+       der TCP/IP-Regel oben kommen — sonst zerlegt es "TCP/IP", bevor
+       die dortige Regel greifen kann.
+       --------------------------------------------------------------- */
+    [/\bICMPv6\b/g,     'I-C-M-P für I-P sechs'],
+    [/\bIPv4\b/g,       'I-P vier'],
+    [/\bIPv6\b/g,       'I-P sechs'],
+    [/\bIPsec\b/gi,     'I-P-Sec'],
+    [/\bIP\b/g,         'I-P'],
+    [/\bICMP\b/g,       'I-C-M-P'],
+    [/\bIGMP\b/g,       'I-G-M-P'],
+    [/\bNDP\b/g,        'N-D-P'],
+    [/\bNAPT\b/g,       'N-A-P-T'],
+    [/\bTTL\b/g,        'T-T-L'],
+    [/\bVLSM\b/g,       'V-L-S-M'],
+    [/\bOSPF\b/g,       'O-S-P-F'],
+    [/\bBGP\b/g,        'B-G-P'],
+    [/\bEIGRP\b/g,      'E-I-G-R-P'],
+    [/\bRFC\b/g,        'R-F-C'],
+    [/\bDHCP\b/g,       'D-H-C-P'],
+    [/\bDNS\b/g,        'D-N-S'],
+    [/\bRDP\b/g,        'R-D-P'],
+    [/\bESP\b/g,        'E-S-P'],
+    [/\bTLS\b/g,        'T-L-S'],
+    [/\bIKE\b/g,        'I-K-E'],
+    [/\bRSA\b/g,        'R-S-A'],
+    [/\bSSH\b/g,        'S-S-H'],
+    [/\bHTTPS\b/g,      'H-T-T-P-S'],
+    [/\bHTTP\b/g,       'H-T-T-P'],       // nach HTTPS
+    [/\bUDP\b/g,        'U-D-P'],
+    [/\bTCP\b/g,        'T-C-P'],         // nach der TCP/IP-Regel oben
+    [/\bCDN\b/g,        'C-D-N'],
     [/(\d)BASE-/g,      '$1 Base '],   // 10BASE-T -> 10 Base T
     [/\bBASE-/g,        'Base '],
     [/µm/g,             'Mikrometer'],
@@ -84,6 +152,11 @@ const Speech = (() => {
     [/\bGHz\b/g,        'Gigahertz'],
     [/ — /g,            ', '],          // Gedankenstrich -> Sprechpause
     [/ – /g,            ', '],
+    /* Kapiteltitel wie "ARP & NDP" oder "Kurzübersicht & Übergang" werden
+       ueber den Uebersichts-Befehl vorgelesen. Ob eine Stimme das Zeichen
+       selbst aufloest, ist nicht garantiert — hier wird es deshalb sicher
+       ausgeschrieben, statt darauf zu vertrauen. */
+    [/ & /g,            ' und '],
     [/\s+/g,            ' ']
   ];
 
@@ -138,12 +211,14 @@ const Speech = (() => {
      und es gibt keinen eingebauten Standardschluessel.
 
      Stimmen-Voreinstellung: von ruckG4zz am 18.08.2026 nach eigenem
-     Hoervergleich festgelegt.
+     Hoervergleich festgelegt. BEIDE Chirp3-HD — die beiden Sprecher
+     bleiben ueber alle Schichten hinweg dieselben (Wiedererkennungswert,
+     ausfuehrliche Begruendung bei STIMME_B_STANDARD in app.js).
      ===================================================================== */
   const cloudConfig = {
     apiKey: null,
     voiceA: 'de-DE-Chirp3-HD-Enceladus',   // maennlich
-    voiceB: 'de-DE-Studio-C',              // weiblich
+    voiceB: 'de-DE-Chirp3-HD-Achernar',    // weiblich
     rate: 1.0
   };
 

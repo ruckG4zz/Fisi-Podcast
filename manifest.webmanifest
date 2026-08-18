@@ -1,7 +1,7 @@
 {
   "name": "FISI-Podcast — NEINT1",
   "short_name": "FISI-Podcast",
-  "description": "Hörfassung der NEINT1-Enzyklopädie. Pilot: Layer 1, Bitübertragungsschicht.",
+  "description": "Hörfassung der NEINT1-Enzyklopädie: Layer 1 Bitübertragung, Layer 2 Sicherung, Layer 3 Vermittlung.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

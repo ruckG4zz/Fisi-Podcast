@@ -1,15 +1,47 @@
 /* =============================================================================
-   FISI-Podcast-App — Hauptlogik (Layer-1-Pilot)
+   FISI-Podcast-App — Hauptlogik
    -----------------------------------------------------------------------------
    Player, Recap, Fortschritt, Zwischenfragen, Sprung-Navigation.
    Spricht NIE direkt mit der Web Speech API — immer über Speech.*
+
+   AUSWEITUNG 18.08.2026: aus dem Layer-1-Piloten sind drei Schichten
+   geworden (Layer 1, 2 und 3). Die Logik hier ist deshalb konsequent von
+   "PODCAST_L1" auf "die gerade gewaehlte Schicht" umgestellt:
+
+     LAYERS   Liste aller tatsaechlich geladenen Schichten
+     schicht()  aktueller Eintrag       P()  aktueller Podcast
+     R()        aktuelles Begriffsregister
+
+   Warum ueber typeof geprueft wird: faellt eine Inhaltsdatei beim Upload
+   aus (vergessen, zaeher Cache), soll die App mit den uebrigen Schichten
+   weiterlaufen statt komplett zu sterben.
+
+   FORTSCHRITT: JEDE Schicht hat ihren EIGENEN Speicherplatz. Der Schluessel
+   von Layer 1 ist absichtlich unveraendert geblieben — ein bestehender
+   Hoerstand geht durch die Ausweitung nicht verloren.
    ========================================================================== */
 
 const App = (() => {
 
-  const STORE_KEY = 'fisi-podcast-l1-v1';
+  const LAYERS = [
+    { id: 'l1', key: 'fisi-podcast-l1-v1',
+      podcast:  (typeof PODCAST_L1  !== 'undefined') ? PODCAST_L1  : null,
+      register: (typeof REGISTER_L1 !== 'undefined') ? REGISTER_L1 : [],
+      knopf: 'Layer 1', kurz: 'Bitübertragung', gesprochen: 'Layer eins' },
+    { id: 'l2', key: 'fisi-podcast-l2-v1',
+      podcast:  (typeof PODCAST_L2  !== 'undefined') ? PODCAST_L2  : null,
+      register: (typeof REGISTER_L2 !== 'undefined') ? REGISTER_L2 : [],
+      knopf: 'Layer 2', kurz: 'Sicherung', gesprochen: 'Layer zwei' },
+    { id: 'l3', key: 'fisi-podcast-l3-v1',
+      podcast:  (typeof PODCAST_L3  !== 'undefined') ? PODCAST_L3  : null,
+      register: (typeof REGISTER_L3 !== 'undefined') ? REGISTER_L3 : [],
+      knopf: 'Layer 3', kurz: 'Vermittlung', gesprochen: 'Layer drei' }
+  ].filter(l => l.podcast && l.podcast.chapters && l.podcast.chapters.length);
+
+  const LAYER_KEY = 'fisi-podcast-schicht';
 
   const state = {
+    layer: 0,         // Index in LAYERS
     chapter: 0,
     segment: 0,
     playing: false,
@@ -20,40 +52,50 @@ const App = (() => {
     lastQuestion: null
   };
 
+  /* Kurzzugriffe auf die laufende Schicht. Bewusst Funktionen und keine
+     Variablen: beim Schichtwechsel muss sonst an zwanzig Stellen etwas
+     nachgezogen werden — genau so entstehen halbe Zustaende. */
+  function schicht() { return LAYERS[state.layer]; }
+  function P()       { return schicht().podcast; }
+  function R()       { return schicht().register; }
+
   const el = {};      // DOM-Referenzen
 
   /* =====================================================================
-     Fortschritt
+     Fortschritt  (pro Schicht getrennt)
      ===================================================================== */
   function save() {
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify({
+      localStorage.setItem(schicht().key, JSON.stringify({
         chapter: state.chapter,
         segment: state.segment,
         ts: Date.now()
       }));
+      localStorage.setItem(LAYER_KEY, schicht().id);
     } catch (_) { /* privater Modus o.ä. — kein Grund abzustürzen */ }
   }
 
-  function load() {
+  function load(layerIdx = state.layer) {
     try {
-      const raw = localStorage.getItem(STORE_KEY);
+      const l = LAYERS[layerIdx];
+      if (!l) return null;
+      const raw = localStorage.getItem(l.key);
       if (!raw) return null;
       const d = JSON.parse(raw);
       if (typeof d.chapter !== 'number') return null;
-      // Gegen veraltete Stände absichern
-      if (d.chapter >= PODCAST_L1.chapters.length) return null;
-      const ch = PODCAST_L1.chapters[d.chapter];
+      // Gegen veraltete Stände absichern (Kapitelzahl kann sich ändern)
+      if (d.chapter >= l.podcast.chapters.length) return null;
+      const ch = l.podcast.chapters[d.chapter];
       if (d.segment >= ch.segments.length) d.segment = 0;
       return d;
     } catch (_) { return null; }
   }
 
   function resetProgress() {
-    try { localStorage.removeItem(STORE_KEY); } catch (_) {}
+    try { localStorage.removeItem(schicht().key); } catch (_) {}
     state.chapter = 0; state.segment = 0;
     renderChapters(); renderNow();
-    log('Fortschritt zurückgesetzt.', 'sys');
+    log('Fortschritt in ' + schicht().knopf + ' zurückgesetzt.', 'sys');
   }
 
   /* =====================================================================
@@ -68,9 +110,65 @@ const App = (() => {
     while (el.log.children.length > 60) el.log.removeChild(el.log.firstChild);
   }
 
+  /* ---------------------------------------------------------------------
+     SCHICHT-UMSCHALTER
+     ---------------------------------------------------------------------
+     Bewusst als sichtbare Knopfleiste und NICHT als Sprachbefehl gebaut.
+     Begruendung: "spring zu Layer zwei" und "spring zu Layer 2 Sicherung"
+     liessen sich vom Sprungbefehl innerhalb einer Schicht kaum sauber
+     trennen — ein falsch verstandener Schichtwechsel mitten im Hoeren
+     waere deutlich aergerlicher als ein Knopfdruck.
+     --------------------------------------------------------------------- */
+  function renderLayers() {
+    if (!el.layers) return;
+    el.layers.innerHTML = '';
+    LAYERS.forEach((l, i) => {
+      const b = document.createElement('button');
+      b.className = 'layer' + (i === state.layer ? ' active' : '');
+      b.type = 'button';
+      b.innerHTML = `<b>${l.knopf}</b><em>${l.kurz}</em>`;
+      b.onclick = () => layerWechseln(i);
+      el.layers.appendChild(b);
+    });
+  }
+
+  function layerWechseln(idx) {
+    if (idx === state.layer || !LAYERS[idx]) return;
+    stopPlay();                       // laufende Wiedergabe sauber beenden
+    save();                           // Stand der bisherigen Schicht sichern
+    state.layer = idx;
+
+    const gespeichert = load(idx);
+    state.chapter = gespeichert ? gespeichert.chapter : 0;
+    state.segment = gespeichert ? gespeichert.segment : 0;
+
+    try { localStorage.setItem(LAYER_KEY, schicht().id); } catch (_) {}
+
+    if (el.resumeBox) el.resumeBox.hidden = true;
+    if (el.source)    el.source.hidden = true;
+
+    renderKopf();
+    renderLayers();
+    renderChapters();
+    renderNow();
+    updateMediaMeta();
+
+    log(gespeichert
+      ? `Gewechselt zu ${schicht().knopf}. Gespeicherter Stand: Kapitel ${state.chapter + 1}.`
+      : `Gewechselt zu ${schicht().knopf}. Start von vorn.`, 'sys');
+  }
+
+  function renderKopf() {
+    const p = P();
+    el.title.textContent = p.titel;
+    document.getElementById('subtitle').textContent = p.untertitel;
+    const q = document.getElementById('quelle');
+    if (q) q.textContent = p.quelle;
+  }
+
   function renderChapters() {
     el.chapters.innerHTML = '';
-    PODCAST_L1.chapters.forEach((ch, i) => {
+    P().chapters.forEach((ch, i) => {
       const b = document.createElement('button');
       b.className = 'chapter' + (i === state.chapter ? ' active' : '');
       b.innerHTML = `<span class="ch-num">${String(i + 1).padStart(2, '0')}</span>
@@ -82,11 +180,11 @@ const App = (() => {
   }
 
   function renderNow() {
-    const ch = PODCAST_L1.chapters[state.chapter];
+    const ch = P().chapters[state.chapter];
     const total = ch.segments.length;
     el.nowChapter.textContent = `${state.chapter + 1}. ${ch.titel}`;
-    el.nowProgress.textContent = `Abschnitt ${state.segment + 1} von ${total}`;
-    const pct = ((state.chapter + (state.segment / total)) / PODCAST_L1.chapters.length) * 100;
+    el.nowProgress.textContent = `Abschnitt ${state.segment + 1} von ${total} · ${schicht().knopf}`;
+    const pct = ((state.chapter + (state.segment / total)) / P().chapters.length) * 100;
     el.bar.style.width = pct.toFixed(1) + '%';
     // aktives Kapitel markieren
     [...el.chapters.children].forEach((c, i) => c.classList.toggle('active', i === state.chapter));
@@ -154,7 +252,7 @@ const App = (() => {
      beiden auf unterschiedliche Eintraege im Zwischenspeicher und das
      Vorabladen waere wirkungslos (und wuerde doppelt verbrauchen). */
   function segmentText(chIdx, segIdx) {
-    const ch = PODCAST_L1.chapters[chIdx];
+    const ch = P().chapters[chIdx];
     if (!ch) return null;
     const seg = ch.segments[segIdx];
     if (!seg) return null;
@@ -164,9 +262,9 @@ const App = (() => {
 
   /* Die naechste Position im Podcast — ueber Kapitelgrenzen hinweg. */
   function naechstePosition(chIdx, segIdx) {
-    const ch = PODCAST_L1.chapters[chIdx];
+    const ch = P().chapters[chIdx];
     if (ch && segIdx + 1 < ch.segments.length) return [chIdx, segIdx + 1];
-    if (chIdx + 1 < PODCAST_L1.chapters.length) return [chIdx + 1, 0];
+    if (chIdx + 1 < P().chapters.length) return [chIdx + 1, 0];
     return null;
   }
 
@@ -177,18 +275,18 @@ const App = (() => {
     silentKeepAlive(true);
 
     while (state.playing && state.gen === myGen) {
-      const ch = PODCAST_L1.chapters[state.chapter];
+      const ch = P().chapters[state.chapter];
       if (!ch) break;
       const seg = ch.segments[state.segment];
 
       if (!seg) {
         // Kapitel zu Ende -> nächstes
-        if (state.chapter + 1 < PODCAST_L1.chapters.length) {
+        if (state.chapter + 1 < P().chapters.length) {
           state.chapter++; state.segment = 0;
           renderNow(); save(); updateMediaMeta();
           continue;
         } else {
-          log('Layer 1 ist durch. Gut gemacht.', 'sys');
+          log(schicht().knopf + ' ist durch. Gut gemacht.', 'sys');
           stopPlay();
           break;
         }
@@ -315,16 +413,16 @@ const App = (() => {
   function jumpTo(chapterIdx, segIdx = 0, announce = false) {
     const wasPlaying = state.playing;
     stopPlay();
-    state.chapter = Math.max(0, Math.min(chapterIdx, PODCAST_L1.chapters.length - 1));
+    state.chapter = Math.max(0, Math.min(chapterIdx, P().chapters.length - 1));
     state.segment = segIdx;
     save(); renderNow(); updateMediaMeta();
-    const ch = PODCAST_L1.chapters[state.chapter];
+    const ch = P().chapters[state.chapter];
     if (announce) log('Sprung zu: ' + ch.titel, 'sys');
     if (wasPlaying || announce) startPlay();
   }
 
   function nextChapter() {
-    if (state.chapter + 1 < PODCAST_L1.chapters.length) jumpTo(state.chapter + 1, 0, true);
+    if (state.chapter + 1 < P().chapters.length) jumpTo(state.chapter + 1, 0, true);
     else log('Das war schon das letzte Kapitel.', 'sys');
   }
 
@@ -361,7 +459,7 @@ const App = (() => {
      Ohne Vorwurf formuliert: den Faden zu verlieren ist beim Zuhoeren
      voellig normal, das soll sich nicht wie ein Fehler anfuehlen. */
   async function kapitelNeu() {
-    const ch = PODCAST_L1.chapters[state.chapter];
+    const ch = P().chapters[state.chapter];
     const ansage = fuellen(pick(MOD.neustart), { kapitel: ch.titel, kurz: ch.kurz });
     log(ansage, 'recap');
     state.segment = 0;
@@ -381,17 +479,19 @@ const App = (() => {
      werden (vergessener Upload, zaeher Cache), faellt die App nicht komplett
      aus — sie klingt dann nur weniger lebendig. */
   const MOD_STANDARD = {
-    wortmeldung:          ['Wir haben eine Zwischenfrage.'],
-    antwortStart:         ['Klar.'],
-    keinTreffer:          ['Dazu haben wir in Layer eins nichts Passendes.'],
-    keinTrefferAbschluss: ['Merken wir uns für später.'],
-    zurueck:              ['Zurück zum Thema: {kapitel}.'],
-    wiedereinstieg:       ['Willkommen zurück. Wir waren bei {kapitel} — {kurz}.'],
-    sprung:               ['Weiter bei {kapitel}.'],
-    mikroAnsage:          ['Ja bitte?'],
-    wiederholung:         ['Klar, nochmal.'],
-    neustart:             ['Kein Problem, wir fangen bei {kapitel} nochmal von vorne an.'],
-    reaktionen:           ['Mhm.']
+    wortmeldung:            ['Wir haben eine Zwischenfrage.'],
+    antwortStart:           ['Klar.'],
+    keinTreffer:            ['Dazu haben wir in {schicht} nichts Passendes.'],
+    keinTrefferAbschluss:   ['Merken wir uns für später.'],
+    andereSchicht:          ['Das gehört nicht hierher, sondern in {schicht} — Stichwort {begriff}.'],
+    andereSchichtAbschluss: ['Wenn du magst, wechsel oben die Schicht.'],
+    zurueck:                ['Zurück zum Thema: {kapitel}.'],
+    wiedereinstieg:         ['Willkommen zurück. Wir waren bei {kapitel} — {kurz}.'],
+    sprung:                 ['Weiter bei {kapitel}.'],
+    mikroAnsage:            ['Ja bitte?'],
+    wiederholung:           ['Klar, nochmal.'],
+    neustart:               ['Kein Problem, wir fangen bei {kapitel} nochmal von vorne an.'],
+    reaktionen:             ['Mhm.']
   };
 
   /* Fehlende Bausteine werden aufgefuellt, statt dass die App an einer
@@ -411,8 +511,27 @@ const App = (() => {
     return String(vorlage).replace(/\{(\w+)\}/g, (_, k) => werte[k] != null ? werte[k] : '');
   }
 
+  /* Sucht einen Begriff in den Registern der ANDEREN Schichten.
+     Ergebnis wird nur fuer den ehrlichen Verweis benutzt — es wird
+     ausdruecklich NICHT quer geantwortet (siehe Kommentar bei
+     MODERATION.andereSchicht in content-l1.js). */
+  function inAndererSchicht(text) {
+    for (let i = 0; i < LAYERS.length; i++) {
+      if (i === state.layer) continue;
+      const l = LAYERS[i];
+      if (!l.register || !l.register.length) continue;
+      const treffer = Matcher.findTerm(text, l.register);
+      /* Risiko-Aliase (z.B. "man") zaehlen hier NICHT: ein unsicherer
+         Treffer in einer fremden Schicht waere reines Raten. */
+      if (treffer && !treffer.risky) {
+        return { layerIdx: i, layer: l, entry: treffer.entry };
+      }
+    }
+    return null;
+  }
+
   function recapText(kindOfReturn) {
-    const ch = PODCAST_L1.chapters[state.chapter];
+    const ch = P().chapters[state.chapter];
     if (kindOfReturn === 'frage') {
       return fuellen(pick(MOD.zurueck), { kapitel: ch.titel });
     }
@@ -542,7 +661,7 @@ const App = (() => {
     let fortsetzen = false;   // im finally ausgewertet
 
     try {
-      const r = Matcher.parse(text, PODCAST_L1, REGISTER_L1);
+      const r = Matcher.parse(text, P(), R());
 
       if (r.type === 'command') {
         el.qtext.value = '';
@@ -606,16 +725,43 @@ const App = (() => {
 
       /* Kein Treffer — ehrlich sagen, nichts erfinden. */
       if (r.reason === 'sprungziel-unklar') {
-        const t = 'Du willst springen, aber ich habe nicht verstanden wohin. Sag zum Beispiel: spring zu Topologien.';
+        /* Das Beispiel wird aus der LAUFENDEN Schicht genommen. Frueher stand
+           hier fest "spring zu Topologien" — in Layer 2 oder 3 waere das ein
+           Ratschlag, der garantiert ins Leere laeuft. */
+        const beispiel = P().chapters[Math.min(2, P().chapters.length - 1)].titel;
+        const t = `Du willst springen, aber ich habe nicht verstanden wohin. Sag zum Beispiel: spring zu ${beispiel}.`;
         log(t, 'err');
         await Speech.speak(t, { voice: 'b' });
         fortsetzen = wasPlaying;
         return;
       }
 
+      /* ===== NEU MIT LAYER 2 UND 3: Verweis statt blosser Absage =====
+         Bevor ehrlich gepasst wird, wird geprueft, ob der Begriff in einer
+         ANDEREN geladenen Schicht steht. Dann kommt kein "kenne ich nicht",
+         sondern ein Wegweiser. Beantwortet wird trotzdem nichts aus der
+         fremden Schicht — der Podcast bleibt bei seinem Thema. */
+      const woanders = inAndererSchicht(text);
+      if (woanders) {
+        const verweis = fuellen(pick(MOD.andereSchicht), {
+          schicht: woanders.layer.gesprochen,
+          begriff: woanders.entry.label
+        });
+        log(verweis, 'answer');
+        showOtherLayer(woanders);
+        await Speech.speak(verweis, { voice: 'a' });
+
+        const nach = pick(MOD.andereSchichtAbschluss);
+        log(nach, 'recap');
+        await Speech.speak(nach, { voice: 'b' });
+        el.qtext.value = '';
+        fortsetzen = wasPlaying;
+        return;
+      }
+
       /* Auch hier keine zweite Ankuendigung mehr (siehe oben) — direkt zur
          ehrlichen Absage. */
-      const absage = pick(MOD.keinTreffer);
+      const absage = fuellen(pick(MOD.keinTreffer), { schicht: schicht().gesprochen });
       log(absage, 'err');
       showNoMatch();
       await Speech.speak(absage, { voice: 'a' });
@@ -644,8 +790,8 @@ const App = (() => {
   }
 
   async function speakOverview() {
-    const list = PODCAST_L1.chapters.map((c, i) => `${i + 1}: ${c.titel}`).join('. ');
-    const t = `Layer 1 hat ${PODCAST_L1.chapters.length} Kapitel. ${list}.`;
+    const list = P().chapters.map((c, i) => `${i + 1}: ${c.titel}`).join('. ');
+    const t = `${schicht().gesprochen} hat ${P().chapters.length} Kapitel. ${list}.`;
     log(t, 'answer');
     await Speech.speak(t, { voice: 'b' });
   }
@@ -655,19 +801,34 @@ const App = (() => {
     el.source.hidden = false;
     el.source.innerHTML =
       `<strong>Treffer:</strong> ${entry.label}
-       <span class="src-chip">Kapitel: ${(PODCAST_L1.chapters.find(c => c.id === entry.chapter) || {}).titel || entry.chapter}</span>
+       <span class="src-chip">Kapitel: ${(P().chapters.find(c => c.id === entry.chapter) || {}).titel || entry.chapter}</span>
        <button class="src-jump" type="button">Dorthin springen</button>
-       <div class="src-note">Quelle: NEINT1-Enzyklopädie, Section sec-l1 (Begriffsregister).</div>`;
+       <div class="src-note">Quelle: ${P().quelle} (Begriffsregister).</div>`;
     el.source.querySelector('.src-jump').onclick = () => {
-      const idx = PODCAST_L1.chapters.findIndex(c => c.id === entry.chapter);
+      const idx = P().chapters.findIndex(c => c.id === entry.chapter);
       if (idx >= 0) jumpTo(idx, 0, true);
+    };
+  }
+
+  /* Der Begriff steht in einer anderen Schicht — Wegweiser statt Antwort. */
+  function showOtherLayer(fund) {
+    el.source.hidden = false;
+    el.source.innerHTML =
+      `<strong>Gehört zu ${fund.layer.knopf}:</strong> ${fund.entry.label}
+       <span class="src-chip">${fund.layer.podcast.titel}</span>
+       <button class="src-jump" type="button">Zu ${fund.layer.knopf} wechseln</button>
+       <div class="src-note">Beantwortet wird hier bewusst nichts aus einer anderen Schicht — sonst käme Stoff, der an dieser Stelle noch nicht einzuordnen ist. Der Stand in ${schicht().knopf} bleibt gespeichert.</div>`;
+    el.source.querySelector('.src-jump').onclick = () => {
+      const zielKapitel = fund.layer.podcast.chapters.findIndex(c => c.id === fund.entry.chapter);
+      layerWechseln(fund.layerIdx);
+      if (zielKapitel >= 0) jumpTo(zielKapitel, 0, true);
     };
   }
 
   function showNoMatch() {
     el.source.hidden = false;
     el.source.innerHTML =
-      `<strong>Kein Treffer im Layer-1-Register.</strong>
+      `<strong>Kein Treffer — weder in ${schicht().knopf} noch in den anderen geladenen Schichten.</strong>
        <div class="src-note">Es wird bewusst nichts erfunden — beantwortet wird nur, was in NEINT1 tatsächlich steht.</div>
        <button class="src-escalate" type="button" disabled>An eine Live-KI weiterreichen (inaktiv)</button>
        <div class="src-note dim">Platzhalter. Eine Live-Anbindung wäre kostenpflichtig und wird erst nach ausdrücklicher Freigabe aktiviert.</div>`;
@@ -682,25 +843,50 @@ const App = (() => {
      ===================================================================== */
   const CFG_KEY = 'fisi-podcast-stimmen';
 
-  /* Voreinstellung: von ruckG4zz am 18.08.2026 nach eigenem Hoervergleich
-     festgelegt. Die frueheren WaveNet-Vorgaben sind bewusst entfernt —
-     ebenso wie die Browser-Stimme als Ganzes (siehe Kopf von speech.js). */
+  /* ---------------------------------------------------------------------
+     STIMMEN-VOREINSTELLUNG — beide Chirp3-HD
+     ---------------------------------------------------------------------
+     Von ruckG4zz nach eigenem Hoervergleich festgelegt. Die frueheren
+     WaveNet-Vorgaben sind bewusst entfernt, ebenso die Browser-Stimme als
+     Ganzes (siehe Kopf von speech.js).
+
+     KORRIGIERT 18.08.2026 (Layer-2/3-Session): Hier stand fuer Stimme B
+     noch 'de-DE-Studio-C'. Gehoert wurde aber laengst Achernar — die Wahl
+     lag nur im Geraetespeicher, nicht im Code. Auf einem frisch
+     eingerichteten Geraet (oder nach dem Loeschen der Browserdaten, was
+     vor einem Test schon vorkam) haette der Podcast damit ploetzlich mit
+     einer ANDEREN Frauenstimme gesprochen.
+
+     Warum das mehr als Kosmetik ist: Wiedererkennungswert ist bei einem
+     Podcast ein Grundsatz, kein Detail. Zwei Sprecher, die ueber alle
+     Schichten hinweg dieselben bleiben, sind Teil des roten Fadens —
+     genauso wie das durchgehende Farbschema bei den HTML-Enzyklopaedien.
+     Ein Stimmwechsel mitten in der Reihe wuerde denselben Bruch erzeugen.
+
+     Nebeneffekt, positiv: beide Stimmen sind jetzt Chirp3-HD und teilen
+     sich damit dasselbe, deutlich groessere Freikontingent (1 Mio. statt
+     100.000 Zeichen/Monat bei Studio). Bei ~84.000 Zeichen fuer alle drei
+     Schichten faellt das erst richtig ins Gewicht.
+     --------------------------------------------------------------------- */
   const STIMME_A_STANDARD = 'de-DE-Chirp3-HD-Enceladus';   // männlich
-  const STIMME_B_STANDARD = 'de-DE-Studio-C';              // weiblich
+  const STIMME_B_STANDARD = 'de-DE-Chirp3-HD-Achernar';    // weiblich
 
   const cfg = {
     apiKey: '',
     voiceA: STIMME_A_STANDARD,
-    voiceB: STIMME_B_STANDARD
+    voiceB: STIMME_B_STANDARD,
+    stimmwechsel: false      // Marke: Studio-C -> Achernar bereits erledigt
   };
 
   function cfgLaden() {
+    let nachtragen = false;
     try {
       const d = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
       Object.assign(cfg, {
         apiKey: d.apiKey || '',
         voiceA: d.voiceA || cfg.voiceA,
-        voiceB: d.voiceB || cfg.voiceB
+        voiceB: d.voiceB || cfg.voiceB,
+        stimmwechsel: !!d.stimmwechsel
       });
       /* Altlast aufraeumen: wer die App vor dem 18.08.2026 benutzt hat, hat
          noch WaveNet-Stimmen im Geraetespeicher stehen. Die werden einmalig
@@ -708,8 +894,24 @@ const App = (() => {
          den alten Stimmen weiterhoert. */
       if (/Wavenet|Standard/i.test(cfg.voiceA)) cfg.voiceA = STIMME_A_STANDARD;
       if (/Wavenet|Standard/i.test(cfg.voiceB)) cfg.voiceB = STIMME_B_STANDARD;
+
+      /* ---------------------------------------------------------------
+         EINMALIGE Umstellung Studio-C -> Achernar.
+
+         Bewusst EINMALIG und mit Marke im Geraetespeicher, nicht als
+         Dauerregel: sonst wuerde eine spaeter bewusst ueber die Auswahl
+         getroffene Studio-Wahl bei jedem App-Start wieder ueberschrieben.
+         Man koennte die Stimme dann gar nicht mehr umstellen — ein
+         "Fix", der eine Funktion kaputtmacht, ist keiner.
+         --------------------------------------------------------------- */
+      if (!cfg.stimmwechsel) {
+        if (cfg.voiceB === 'de-DE-Studio-C') cfg.voiceB = STIMME_B_STANDARD;
+        cfg.stimmwechsel = true;
+        nachtragen = true;
+      }
     } catch (_) {}
-    anwendenCfg();
+    if (nachtragen) cfgSpeichern();   // schreibt die Marke mit weg
+    else            anwendenCfg();
   }
 
   function cfgSpeichern() {
@@ -883,11 +1085,11 @@ const App = (() => {
 
   function updateMediaMeta() {
     if (!('mediaSession' in navigator)) return;
-    const ch = PODCAST_L1.chapters[state.chapter];
+    const ch = P().chapters[state.chapter];
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: ch.titel,
-        artist: 'NEINT1 · Layer 1 — Bitübertragungsschicht',
+        artist: 'NEINT1 · ' + P().titel,
         album: 'FISI-Podcast',
         artwork: [{ src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }]
       });
@@ -913,7 +1115,7 @@ const App = (() => {
      ===================================================================== */
   async function init() {
     // DOM einsammeln
-    ['play','mic','ask','qtext','chapters','log','bar','nowChapter','nowProgress',
+    ['play','mic','ask','qtext','chapters','layers','log','bar','nowChapter','nowProgress',
      'transcript','speaker','source','diag','reset','next','prev',
      'micbox','micStatus','micHeardText',
      'keyWarn','apiKey','apiSave','apiShow','apiTest',
@@ -922,9 +1124,25 @@ const App = (() => {
       .forEach(id => el[id] = document.getElementById(id));
 
     el.title = document.getElementById('title');
-    el.title.textContent = PODCAST_L1.titel;
-    document.getElementById('subtitle').textContent = PODCAST_L1.untertitel;
 
+    /* Notausgang: ohne geladene Inhaltsdatei gibt es nichts abzuspielen.
+       Lieber eine klare Meldung als eine App, die stumm im Nichts steht. */
+    if (!LAYERS.length) {
+      el.title.textContent = 'Keine Inhalte geladen';
+      document.getElementById('subtitle').textContent =
+        'Es wurde keine der Dateien content-l1.js, content-l2.js oder content-l3.js gefunden.';
+      return;
+    }
+
+    /* Zuletzt gehoerte Schicht wiederherstellen */
+    try {
+      const zuletzt = localStorage.getItem(LAYER_KEY);
+      const idx = LAYERS.findIndex(l => l.id === zuletzt);
+      if (idx >= 0) state.layer = idx;
+    } catch (_) {}
+
+    renderKopf();
+    renderLayers();
     renderChapters();
 
     // Sprachschicht hochfahren
@@ -942,7 +1160,7 @@ const App = (() => {
       state.chapter = saved.chapter;
       state.segment = saved.segment;
       const when = new Date(saved.ts);
-      log(`Gespeicherter Stand gefunden (${when.toLocaleDateString('de-DE')}, ${when.toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit'})}).`, 'sys');
+      log(`Gespeicherter Stand in ${schicht().knopf} gefunden (${when.toLocaleDateString('de-DE')}, ${when.toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit'})}).`, 'sys');
       el.resumeBox.hidden = false;
       el.resumeText.textContent = recapText('start');
     }
@@ -1068,6 +1286,6 @@ const App = (() => {
     init();
   });
 
-  return { state, jumpTo, startPlay, stopPlay };
+  return { state, jumpTo, startPlay, stopPlay, layerWechseln, LAYERS };
 })();
 

@@ -16,12 +16,14 @@
 
 /* Cache-Name bei JEDER Änderung an den Dateien hochzählen — sonst liefert
    der Service Worker hartnäckig die alte Fassung aus. */
-const CACHE = 'fisi-podcast-l1-v7';
+const CACHE = 'fisi-podcast-l1-v9';
 
 const ASSETS = [
   './',
   './index.html',
   './content-l1.js',
+  './content-l2.js',
+  './content-l3.js',
   './matcher.js',
   './cloud-tts.js',
   './speech.js',

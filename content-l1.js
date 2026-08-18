@@ -378,6 +378,12 @@ const PODCAST_L1 = {
 
    Sprecher-Logik:  B kuendigt die Wortmeldung an  ->  A antwortet fachlich
                     ->  B leitet zurueck ins Thema.
+
+   GEMEINSAM FUER ALLE SCHICHTEN (seit 18.08.2026, Ausweitung auf Layer 2
+   und 3): Dieser Block liegt bewusst weiterhin in content-l1.js und wird
+   von allen Schichten mitbenutzt — eine Quelle, keine drei Kopien.
+   Deshalb steht hier nirgends mehr fest "Layer eins": der Platzhalter
+   {schicht} wird von app.js mit der gerade laufenden Schicht gefuellt.
    ========================================================================== */
 
 const MODERATION = {
@@ -407,18 +413,46 @@ const MODERATION = {
     'Sehr berechtigt, das ist ein Stolperstein.'
   ],
 
-  /* A muss ehrlich passen — kein Treffer im Layer-1-Register */
+  /* A muss ehrlich passen — kein Treffer im Register der laufenden Schicht.
+     {schicht} wird von app.js gefuellt ("Layer eins", "Layer zwei", ...). */
   keinTreffer: [
-    'Ehrlich gesagt: dazu haben wir in Layer eins nichts Passendes. Das gehört vermutlich in eine andere Schicht.',
-    'Da muss ich passen. In Layer eins kommt das nicht vor. Gut möglich, dass es weiter oben auftaucht.',
-    'Das können wir hier nicht sauber beantworten. In Schicht eins steht dazu nichts. Ich rate lieber nicht.'
+    'Ehrlich gesagt: dazu haben wir in {schicht} nichts Passendes. Das gehört vermutlich in eine andere Schicht.',
+    'Da muss ich passen. In {schicht} kommt das nicht vor. Gut möglich, dass es woanders auftaucht.',
+    'Das können wir hier nicht sauber beantworten. In {schicht} steht dazu nichts. Ich rate lieber nicht.'
   ],
 
   /* B nimmt den Kein-Treffer-Fall auf */
   keinTrefferAbschluss: [
     'Dann merken wir uns das für später.',
-    'Setzen wir auf die Liste für die nächsten Schichten.',
+    'Setzen wir das auf die Liste für die anderen Schichten.',
     'Gut, dass du nicht einfach was erfindest.'
+  ],
+
+  /* ---------------------------------------------------------------------
+     VERWEIS AUF EINE ANDERE SCHICHT (neu 18.08.2026 mit Layer 2 und 3)
+     ---------------------------------------------------------------------
+     Seit drei Schichten geladen sind, gibt es einen Fall zwischen Treffer
+     und Nicht-Treffer: der Begriff kommt in der LAUFENDEN Schicht nicht
+     vor, wohl aber in einer anderen.
+
+     Bewusste Entscheidung: es wird trotzdem NICHT quer geantwortet. Der
+     Podcast bleibt bei seinem Thema und sagt nur ehrlich, wo die Antwort
+     zu finden ist. Sonst wuerde eine Layer-1-Folge unversehens Layer-3-
+     Stoff erklaeren, den man an der Stelle noch gar nicht einordnen kann.
+
+     {begriff} und {schicht} werden von app.js gefuellt.
+     --------------------------------------------------------------------- */
+  andereSchicht: [
+    'Das gehört nicht hierher, sondern in {schicht} — Stichwort {begriff}. Dort gehen wir das in Ruhe durch.',
+    'Guter Punkt, nur eine Etage daneben: {begriff} behandeln wir in {schicht}.',
+    'Dazu sage ich hier bewusst nichts Halbes. {begriff} gehört in {schicht}, da ist es sauber erklärt.'
+  ],
+
+  /* B nimmt den Verweis auf und bietet den Wechsel an */
+  andereSchichtAbschluss: [
+    'Wenn du magst, wechsel oben einfach die Schicht.',
+    'Du kannst jederzeit dorthin wechseln, der Stand hier bleibt gespeichert.',
+    'Merk es dir für nachher, wir bleiben erst mal hier.'
   ],
 
   /* B leitet zurück ins laufende Kapitel. {kapitel} wird ersetzt. */
@@ -458,6 +492,25 @@ const MODERATION = {
     'Ah, eine Zwischenfrage. Nur zu.',
     'Moment mal, da will jemand was wissen. Bitte.',
     'Halt, kurz stoppen. Was möchtest du wissen?'
+  ],
+
+  /* ---------------------------------------------------------------------
+     NEUSTART DES KAPITELS ("ich habe den Faden verloren")
+     ---------------------------------------------------------------------
+     NACHGETRAGEN 18.08.2026: Der Sprachbefehl 'restart' wurde gebaut, der
+     zugehoerige Moderations-Baustein aber vergessen — die App lief bis
+     hierher auf dem Notnagel-Standardtext aus app.js (genau eine
+     Formulierung, jedes Mal dieselbe). Beim Ausbau auf Layer 2 und 3 hat
+     die neue Platzhalter-Pruefung in test-matcher.js das aufgedeckt.
+
+     Ton bewusst ohne jeden Vorwurf: den Faden zu verlieren ist beim
+     Zuhoeren voellig normal und soll sich nicht wie ein Fehler anfuehlen.
+     {kapitel} und {kurz} werden von app.js gefuellt. */
+  neustart: [
+    'Kein Problem, wir nehmen {kapitel} nochmal von vorn.',
+    'Machen wir. Zurück an den Anfang von {kapitel} — es ging um {kurz}.',
+    'Passiert. Wir starten {kapitel} nochmal von vorne.',
+    'Gern, nochmal von vorn: {kapitel}, {kurz}.'
   ],
 
   /* Bestätigung auf "kannst du das nochmal wiederholen" */
