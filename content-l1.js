@@ -447,6 +447,53 @@ const MODERATION = {
     'Alles klar, wir springen zu {kapitel}.',
     'Machen wir. Weiter bei {kapitel}.',
     'Gut, dann direkt zu {kapitel}.'
+  ],
+
+  /* ---------------------------------------------------------------------
+     SOFORT-REAKTION beim Druck auf die Aufnahmetaste
+     ---------------------------------------------------------------------
+     Wird gesprochen, sobald das Mikrofon angefordert wird — und zwar
+     NACHDEM der laufende Satz mitten im Wort abgeschnitten wurde.
+     Bewusst sehr kurz: jede Silbe hier ist Wartezeit, bevor die Aufnahme
+     wirklich losgeht.
+     --------------------------------------------------------------------- */
+  mikroAnsage: [
+    'Oh, Moment — da kommt eine Frage. Ja bitte?',
+    'Warte kurz, da meldet sich jemand. Ja?',
+    'Ah, eine Zwischenfrage. Nur zu.',
+    'Moment mal, da will jemand was wissen. Bitte.',
+    'Halt, kurz stoppen. Was möchtest du wissen?'
+  ],
+
+  /* Bestätigung auf "kannst du das nochmal wiederholen" */
+  wiederholung: [
+    'Klar, das nehmen wir nochmal.',
+    'Gerne, ich sag das nochmal.',
+    'Kein Problem, nochmal von vorn.',
+    'Machen wir. Das war der Abschnitt:'
+  ],
+
+  /* ---------------------------------------------------------------------
+     HEBEL 3 — kurze Reaktions-Einwürfe beim Sprecherwechsel
+     ---------------------------------------------------------------------
+     Werden dem Segmenttext vorangestellt, damit daraus EINE Audiodatei
+     wird (kein zusätzlicher Schnitt, keine zusätzliche Lücke).
+     Bewusst sehr kurz und inhaltsleer gehalten: sie sollen den Wechsel
+     weich machen, nicht zusätzliche Aussagen einbringen. Damit bleibt
+     auch die Regel "kein erfundener Inhalt" gewahrt — hier steht nichts
+     Fachliches drin, das nicht aus NEINT1 stammt.
+     --------------------------------------------------------------------- */
+  reaktionen: [
+    'Mhm.',
+    'Ah, okay.',
+    'Verstehe.',
+    'Ja, klar.',
+    'Interessant.',
+    'Gut.',
+    'Aha.',
+    'Stimmt.',
+    'Okay, ja.',
+    'Genau.'
   ]
 };
 

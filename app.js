@@ -102,6 +102,56 @@ const App = (() => {
   /* =====================================================================
      Player
      ===================================================================== */
+  /* ---------------------------------------------------------------------
+     HEBEL 3 — kurze Reaktions-Einwuerfe beim Sprecherwechsel
+     ---------------------------------------------------------------------
+     Im echten Gespraech sagt der Zuhoerende nicht nichts. Beim Wechsel
+     wird deshalb gelegentlich ein kurzes "Mhm." o.ae. vorangestellt.
+
+     ZWEI BEWUSSTE ENTSCHEIDUNGEN:
+
+     1. Der Einwurf wird dem Segmenttext VORANGESTELLT, nicht als eigener
+        Sprechvorgang abgespielt. Damit bleibt es EINE Audiodatei — kein
+        zusaetzlicher Schnitt, keine zusaetzliche Luecke.
+
+     2. Die Auswahl ist DETERMINISTISCH (aus Kapitel- und Segmentnummer
+        gerechnet), nicht zufaellig. Bei Zufall bekaeme dasselbe Segment
+        bei jedem Hoeren einen anderen Text — und damit jedes Mal einen
+        neuen Eintrag im Zwischenspeicher, der neu synthetisiert werden
+        muesste. Deterministisch heisst: einmal erzeugt, fuer immer aus
+        dem Geraetespeicher. Belastet das Monatskontingent also nur beim
+        allerersten Durchlauf, danach null.
+     --------------------------------------------------------------------- */
+  function reaktionFuer(chIdx, segIdx, seg, vorheriges) {
+    if (!vorheriges || vorheriges.voice === seg.voice) return '';
+    const liste = (MOD.reaktionen && MOD.reaktionen.length) ? MOD.reaktionen : null;
+    if (!liste) return '';
+    const h = (chIdx * 977 + segIdx * 31 + 7) >>> 0;
+    if (h % 3 !== 0) return '';                 // nur etwa jeder dritte Wechsel
+    return liste[h % liste.length] + ' ';
+  }
+
+  /* Der endgueltige Sprechtext einer Position.
+     MUSS fuer Wiedergabe UND Vorabladen identisch sein, sonst zeigen die
+     beiden auf unterschiedliche Eintraege im Zwischenspeicher und das
+     Vorabladen waere wirkungslos (und wuerde doppelt verbrauchen). */
+  function segmentText(chIdx, segIdx) {
+    const ch = PODCAST_L1.chapters[chIdx];
+    if (!ch) return null;
+    const seg = ch.segments[segIdx];
+    if (!seg) return null;
+    const vorheriges = segIdx > 0 ? ch.segments[segIdx - 1] : null;
+    return { text: reaktionFuer(chIdx, segIdx, seg, vorheriges) + seg.text, voice: seg.voice, seg };
+  }
+
+  /* Die naechste Position im Podcast — ueber Kapitelgrenzen hinweg. */
+  function naechstePosition(chIdx, segIdx) {
+    const ch = PODCAST_L1.chapters[chIdx];
+    if (ch && segIdx + 1 < ch.segments.length) return [chIdx, segIdx + 1];
+    if (chIdx + 1 < PODCAST_L1.chapters.length) return [chIdx + 1, 0];
+    return null;
+  }
+
   async function playLoop() {
     const myGen = ++state.gen;
     state.playing = true;
@@ -128,16 +178,52 @@ const App = (() => {
 
       renderNow();
       highlightSegment(seg);
-      const res = await Speech.speak(seg.text, { voice: seg.voice });
+
+      const jetzt = segmentText(state.chapter, state.segment);
+
+      /* VORABLADEN des naechsten Segments — nicht abwarten, laeuft parallel
+         zum aktuellen Sprechen. Das ist der eigentliche Fix gegen den
+         Abbruch bei gesperrtem Bildschirm: beim Segmentwechsel entsteht
+         dadurch keine Netz-Wartezeit mehr, in der Android die Wiedergabe
+         fuer beendet haelt. Kostet kein zusaetzliches Zeichen, es zieht
+         denselben Abruf nur zeitlich vor. */
+      const np = naechstePosition(state.chapter, state.segment);
+      if (np) {
+        const kommt = segmentText(np[0], np[1]);
+        if (kommt) Speech.prefetch(kommt.text, { voice: kommt.voice });
+      }
+
+      const res = await Speech.speak(jetzt.text, { voice: jetzt.voice });
 
       // Während des Sprechens abgebrochen (Pause, Frage, Sprung)?
       if (state.gen !== myGen) return;
+
+      /* Cloud-Fehler sind jetzt LAUT, nicht mehr still (kein Rueckfall auf
+         die Browser-Stimme). Ohne diese Anzeige waere die App einfach
+         stumm und niemand wuesste warum. */
+      if (res && (res.error === 'kein-schluessel' || res.error === 'cloud-fehler')) {
+        log('Sprachausgabe gestoppt: ' + (res.cloudFehler || res.error), 'err');
+        zeigeSprachFehler(res.cloudFehler || res.error);
+        stopPlay();
+        return;
+      }
+
       if (res && res.stopped) { return; }
 
       state.segment++;
       save();
     }
     silentKeepAlive(false);
+  }
+
+  /* Sichtbare, unuebersehbare Meldung wenn die Sprachausgabe nicht kann. */
+  function zeigeSprachFehler(text) {
+    el.transcript.innerHTML =
+      '<strong style="color:var(--bad)">Keine Sprachausgabe.</strong><br>' +
+      String(text) +
+      '<br><span style="color:var(--fg-dim);font-size:.85em">' +
+      'Die Browser-Stimme wurde bewusst entfernt — es gibt keinen stillen Ersatz mehr. ' +
+      'Trag unter „Stimmen" einen gültigen API-Schlüssel ein.</span>';
   }
 
   function highlightSegment(seg) {
@@ -185,9 +271,22 @@ const App = (() => {
     else log('Du bist schon am Anfang.', 'sys');
   }
 
-  function repeatSegment() {
-    state.segment = Math.max(0, state.segment - 1);
-    jumpTo(state.chapter, state.segment, true);
+  /* "Kannst du das nochmal wiederholen?"
+     ---------------------------------------------------------------------
+     Bewusst NICHT ueber repeatSegment(): das springt eins zurueck, was nur
+     stimmt, wenn das Segment vorher sauber zu Ende lief. Beim Wiederholen
+     kommt der Wunsch aber fast immer waehrend eines Segments — die Frage
+     unterbricht es. state.segment zeigt dann noch auf genau dieses
+     angefangene Segment, und genau das soll noch einmal kommen.
+
+     Ausserdem wird der Wunsch hoerbar bestaetigt, statt wortlos neu
+     anzusetzen. */
+  async function wiederholen() {
+    const ansage = pick(MOD.wiederholung);
+    log(ansage, 'recap');
+    await Speech.speak(ansage, { voice: 'b' });
+    renderNow(); save();
+    startPlay();
   }
 
   /* =====================================================================
@@ -200,15 +299,26 @@ const App = (() => {
   /* Notnagel: sollte content-l1.js mal in einer aelteren Fassung ausgeliefert
      werden (vergessener Upload, zaeher Cache), faellt die App nicht komplett
      aus — sie klingt dann nur weniger lebendig. */
-  const MOD = (typeof MODERATION !== 'undefined' && MODERATION) ? MODERATION : {
+  const MOD_STANDARD = {
     wortmeldung:          ['Wir haben eine Zwischenfrage.'],
     antwortStart:         ['Klar.'],
     keinTreffer:          ['Dazu haben wir in Layer eins nichts Passendes.'],
     keinTrefferAbschluss: ['Merken wir uns für später.'],
     zurueck:              ['Zurück zum Thema: {kapitel}.'],
     wiedereinstieg:       ['Willkommen zurück. Wir waren bei {kapitel} — {kurz}.'],
-    sprung:               ['Weiter bei {kapitel}.']
+    sprung:               ['Weiter bei {kapitel}.'],
+    mikroAnsage:          ['Ja bitte?'],
+    wiederholung:         ['Klar, nochmal.'],
+    reaktionen:           ['Mhm.']
   };
+
+  /* Fehlende Bausteine werden aufgefuellt, statt dass die App an einer
+     aelteren content-l1.js scheitert (vergessener Upload, zaeher Cache). */
+  const MOD = Object.assign({}, MOD_STANDARD,
+    (typeof MODERATION !== 'undefined' && MODERATION) ? MODERATION : {});
+  for (const k of Object.keys(MOD_STANDARD)) {
+    if (!Array.isArray(MOD[k]) || !MOD[k].length) MOD[k] = MOD_STANDARD[k];
+  }
 
   function pick(arr) {
     if (!arr || !arr.length) return '';
@@ -258,11 +368,40 @@ const App = (() => {
     }
     const wasPlaying = state.playing;
     state.busy = true;
+
+    /* ===== SOFORT-UNTERBRECHUNG (Wunsch ruckG4zz, 18.08.2026) =====
+       Vorher wurde die Wiedergabe wortlos gekappt — das wirkte abrupt und
+       unnatuerlich. In einem echten Gespraech redet der andere nicht
+       stumpf zu Ende, er reagiert. Genau das passiert jetzt:
+
+         1. Der laufende Satz wird SOFORT abgeschnitten, mitten im Wort.
+            Er wird ausdruecklich NICHT zu Ende gesprochen.
+         2. Direkt danach kommt eine kurze hoerbare Reaktion
+            ("Oh, Moment — da kommt eine Frage. Ja bitte?").
+         3. Erst dann geht das Mikrofon auf.
+
+       Preis dafuer, ehrlich benannt: die Aufnahme startet rund ein bis
+       zwei Sekunden spaeter als vorher. Beim allerersten Mal etwas mehr,
+       weil die Ansage einmal synthetisiert werden muss — danach liegt sie
+       im Geraetespeicher und kommt ohne Verzoegerung. */
+    Speech.stopSofort();
     stopPlay();
 
     el.mic.classList.add('listening');
-    el.mic.textContent = '🎤  Ich höre …';
+    el.mic.textContent = '🎤  Moment …';
     micHeard('');
+    micStatus('Unterbreche …');
+
+    try {
+      const ansage = pick(MOD.mikroAnsage);
+      log(ansage, 'recap');
+      await Speech.speak(ansage, { voice: 'b' });
+    } catch (_) {
+      /* Die Ansage ist Hoeflichkeit, kein Muss. Scheitert sie, wird
+         trotzdem zugehoert — sonst waere die Frage verloren. */
+    }
+
+    el.mic.textContent = '🎤  Ich höre …';
     micStatus('Starte …');
     log('Mikrofon angefordert.', 'sys');
 
@@ -325,11 +464,29 @@ const App = (() => {
 
       if (r.type === 'command') {
         el.qtext.value = '';
+
+        /* ===== BEHOBENER SACKGASSEN-FEHLER (18.08.2026) =====
+           startPlay() beginnt mit `if (state.busy) return;`. state.busy wird
+           beim Stellen einer Frage gesetzt und erst im finally weiter unten
+           wieder geloest — also NACH diesen return-Anweisungen hier.
+
+           Folge vorher: jeder Befehl, der die Wiedergabe wieder anwerfen
+           wollte (jump, next, prev, repeat, resume), prallte an genau dieser
+           Sperre ab. Es passierte schlicht nichts, der Podcast stand.
+           Das war exakt der von ruckG4zz gemeldete Fall "kannst du das
+           nochmal wiederholen" -> keine Reaktion, kein Weiterlaufen.
+
+           Ein Befehl ist eine abgeschlossene Handlung, kein laufender
+           Frage-Antwort-Vorgang. Deshalb wird die Sperre hier VOR der
+           Ausfuehrung geloest. Das finally unten setzt sie ohnehin
+           nochmal — doppelt schadet nicht. */
+        state.busy = false;
+
         switch (r.cmd) {
           case 'jump':     jumpTo(r.index, 0, true); return;
           case 'next':     nextChapter(); return;
           case 'prev':     prevChapter(); return;
-          case 'repeat':   repeatSegment(); return;
+          case 'repeat':   await wiederholen(); return;
           case 'pause':    log('Pausiert.', 'sys'); return;
           case 'resume':   startPlay(); return;
           case 'recap':    await speakRecap('manuell'); if (wasPlaying) startPlay(); return;
@@ -437,22 +594,32 @@ const App = (() => {
      ===================================================================== */
   const CFG_KEY = 'fisi-podcast-stimmen';
 
+  /* Voreinstellung: von ruckG4zz am 18.08.2026 nach eigenem Hoervergleich
+     festgelegt. Die frueheren WaveNet-Vorgaben sind bewusst entfernt —
+     ebenso wie die Browser-Stimme als Ganzes (siehe Kopf von speech.js). */
+  const STIMME_A_STANDARD = 'de-DE-Chirp3-HD-Enceladus';   // männlich
+  const STIMME_B_STANDARD = 'de-DE-Studio-C';              // weiblich
+
   const cfg = {
-    provider: 'browser',
     apiKey: '',
-    voiceA: 'de-DE-Wavenet-B',
-    voiceB: 'de-DE-Wavenet-F'
+    voiceA: STIMME_A_STANDARD,
+    voiceB: STIMME_B_STANDARD
   };
 
   function cfgLaden() {
     try {
       const d = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
       Object.assign(cfg, {
-        provider: d.provider === 'cloud' ? 'cloud' : 'browser',
-        apiKey:   d.apiKey  || '',
-        voiceA:   d.voiceA  || cfg.voiceA,
-        voiceB:   d.voiceB  || cfg.voiceB
+        apiKey: d.apiKey || '',
+        voiceA: d.voiceA || cfg.voiceA,
+        voiceB: d.voiceB || cfg.voiceB
       });
+      /* Altlast aufraeumen: wer die App vor dem 18.08.2026 benutzt hat, hat
+         noch WaveNet-Stimmen im Geraetespeicher stehen. Die werden einmalig
+         auf die neue Voreinstellung gehoben, damit niemand ungewollt mit
+         den alten Stimmen weiterhoert. */
+      if (/Wavenet|Standard/i.test(cfg.voiceA)) cfg.voiceA = STIMME_A_STANDARD;
+      if (/Wavenet|Standard/i.test(cfg.voiceB)) cfg.voiceB = STIMME_B_STANDARD;
     } catch (_) {}
     anwendenCfg();
   }
@@ -464,11 +631,8 @@ const App = (() => {
 
   function anwendenCfg() {
     Speech.setCloudConfig({ apiKey: cfg.apiKey || null, voiceA: cfg.voiceA, voiceB: cfg.voiceB });
-    Speech.setProvider(cfg.provider);
-    if (el.provBrowser) el.provBrowser.checked = (cfg.provider !== 'cloud');
-    if (el.provCloud)   el.provCloud.checked   = (cfg.provider === 'cloud');
-    if (el.cloudBox)    el.cloudBox.hidden     = (cfg.provider !== 'cloud');
     if (el.apiKey && document.activeElement !== el.apiKey) el.apiKey.value = cfg.apiKey || '';
+    if (el.keyWarn) el.keyWarn.hidden = !!cfg.apiKey;
     renderUsage();
   }
 
@@ -481,16 +645,27 @@ const App = (() => {
 
   async function renderUsage() {
     if (!el.usage) return;
-    if (cfg.provider !== 'cloud') { el.usage.innerHTML = ''; return; }
 
-    const klasse = CloudTTS.klasseAusName(cfg.voiceA);
+    /* Die beiden Stimmen koennen unterschiedlichen Klassen angehoeren und
+       haben dann UNTERSCHIEDLICHE Freikontingente — Studio 100.000
+       Zeichen/Monat, Chirp3 dagegen 1 Mio. Angezeigt wird deshalb bewusst
+       die knappere der beiden, sonst wiegt die Anzeige in falscher
+       Sicherheit. */
+    const klasseA = CloudTTS.klasseAusName(cfg.voiceA);
+    const klasseB = CloudTTS.klasseAusName(cfg.voiceB);
+    const freiA = CloudTTS.FREI_KONTINGENT[klasseA] || 1000000;
+    const freiB = CloudTTS.FREI_KONTINGENT[klasseB] || 1000000;
+    const klasse = freiA <= freiB ? klasseA : klasseB;
+
     const v = CloudTTS.verbrauch(klasse);
     const anzahl = await CloudTTS.cacheGroesse();
     const heiss = v.anteilProzent > 80;
 
     const fmt = n => n.toLocaleString('de-DE');
     el.usage.innerHTML = `
-      <div><span>Stimmenklasse</span><b>${v.klasse}</b></div>
+      <div><span>Stimme A</span><b>${cfg.voiceA} (${klasseA})</b></div>
+      <div><span>Stimme B</span><b>${cfg.voiceB} (${klasseB})</b></div>
+      <div><span>Maßstab (knapperes Kontingent)</span><b>${v.klasse}</b></div>
       <div><span>Synthetisiert (${v.monat})</span><b>${fmt(v.zeichen)} Zeichen</b></div>
       <div><span>Aus Zwischenspeicher</span><b>${fmt(v.ausCache)} Zeichen — kostenlos</b></div>
       <div><span>Gespeicherte Abschnitte</span><b>${fmt(anzahl)}</b></div>
@@ -507,7 +682,7 @@ const App = (() => {
       const liste = await CloudTTS.stimmenListe(cfg.apiKey);
       if (!liste.length) { apiStatus('Google hat keine deutschen Stimmen gemeldet.', 'bad'); return; }
 
-      const fuellen = (sel, gewaehlt, bevorzugtGeschlecht) => {
+      const fuellen = (sel, gewaehlt, standard) => {
         sel.innerHTML = '';
         liste.forEach(v => {
           const o = document.createElement('option');
@@ -515,14 +690,18 @@ const App = (() => {
           o.textContent = `${v.name}  (${v.geschlecht === 'MALE' ? 'm' : v.geschlecht === 'FEMALE' ? 'w' : '?'}, ${v.klasse})`;
           sel.appendChild(o);
         });
+        /* Reihenfolge der Rueckfallebenen bewusst so: erst die tatsaechlich
+           gewaehlte Stimme, dann die festgelegte Voreinstellung. Frueher
+           landete man hier ersatzweise bei einer WaveNet-Stimme — genau die
+           sollen nicht mehr angesteuert werden. */
         const treffer = liste.find(v => v.name === gewaehlt)
-          || liste.find(v => v.geschlecht === bevorzugtGeschlecht && v.klasse === 'Wavenet')
+          || liste.find(v => v.name === standard)
           || liste[0];
         if (treffer) sel.value = treffer.name;
       };
 
-      fuellen(el.voiceA, cfg.voiceA, 'MALE');
-      fuellen(el.voiceB, cfg.voiceB, 'FEMALE');
+      fuellen(el.voiceA, cfg.voiceA, STIMME_A_STANDARD);
+      fuellen(el.voiceB, cfg.voiceB, STIMME_B_STANDARD);
       cfg.voiceA = el.voiceA.value;
       cfg.voiceB = el.voiceB.value;
       cfgSpeichern();
@@ -537,17 +716,23 @@ const App = (() => {
     if (!cfg.apiKey) { apiStatus('Erst den Schlüssel sichern.', 'bad'); return; }
     stopPlay();
     apiStatus('Hörprobe läuft …');
-    const alt = Speech.getProvider();
-    Speech.setProvider('cloud');
     try {
-      await Speech.speak('Ich bin Stimme A und übernehme die Erklärungen.', { voice: 'a' });
-      await Speech.speak('Und ich bin Stimme B, ich stelle die Zwischenfragen.', { voice: 'b' });
+      /* Bewusst mit englischen Fachbegriffen gespickt: genau daran soll
+         ruckG4zz hoeren, ob der Sprachwechsel von selbst sitzt oder ob die
+         Aussprachetabelle in speech.js nachgeschaerft werden muss.
+         Beide Stimmen tragen hier erklaerende UND fragende Anteile —
+         die Rollen sind nicht mehr fest verteilt. */
+      await Speech.speak(
+        'Ich bin Stimme A. Kurzer Test mit englischen Begriffen: Full Duplex, Crosstalk, Twisted Pair und Access Point.',
+        { voice: 'a' });
+      await Speech.speak(
+        'Und ich bin Stimme B. Ich erkläre genauso mit, zum Beispiel Straight Through, Crossover und Repeater.',
+        { voice: 'b' });
       const f = Speech.letzterFehler();
-      apiStatus(f ? ('Cloud fehlgeschlagen: ' + f) : 'Hörprobe fertig.', f ? 'bad' : 'ok');
+      apiStatus(f ? ('Cloud fehlgeschlagen: ' + f) : 'Hörprobe fertig. Klingen die englischen Begriffe sauber?', f ? 'bad' : 'ok');
     } catch (e) {
       apiStatus(e.message || 'Hörprobe fehlgeschlagen.', 'bad');
     } finally {
-      Speech.setProvider(alt);
       renderUsage();
     }
   }
@@ -577,11 +762,24 @@ const App = (() => {
      ===================================================================== */
   let silentAudio = null;
 
+  /* ---------------------------------------------------------------------
+     STILLER DAUERTON — zweite Haelfte des Hintergrundwiedergabe-Fixes.
+
+     KORREKTUR GEGENUEBER VORHER: Frueher wurde dieser Ton bei aktiver
+     Cloud-Stimme ABGESCHALTET, mit der Begruendung, das <audio>-Element
+     trage die Mediensitzung ohnehin selbst. Das war ein Denkfehler.
+
+     Es traegt sie nur, SOLANGE es spielt. Zwischen zwei Segmenten steht es
+     kurz still — und genau in diesem Moment gibt Android den Audio-Fokus
+     frei und friert die Seite im Hintergrund ein. Der laufende Satz lief
+     noch zu Ende, danach war Schluss: exakt das gemeldete Verhalten.
+
+     Der stille Ton laeuft in Dauerschleife und haelt den Audio-Fokus
+     ueber diese Luecken hinweg. Zusammen mit dem Vorabladen in speech.js
+     (das die Luecke ueberhaupt erst klein macht) ist das der Doppelgriff
+     gegen den Abbruch. Er laeuft jetzt IMMER, unabhaengig von der Stimme.
+     --------------------------------------------------------------------- */
   function silentKeepAlive(on) {
-    /* Bei Cloud-Stimme unnoetig: dort laeuft die Wiedergabe ohnehin ueber ein
-       echtes <audio>-Element, das die Mediensitzung selbst traegt. Der stille
-       Ton wuerde sich damit nur ins Gehege kommen. */
-    if (Speech.cloudAktiv()) { if (silentAudio) { try { silentAudio.pause(); } catch (_) {} } return; }
     try {
       if (!silentAudio) {
         silentAudio = new Audio(
@@ -628,7 +826,7 @@ const App = (() => {
     ['play','mic','ask','qtext','chapters','log','bar','nowChapter','nowProgress',
      'transcript','speaker','source','diag','reset','next','prev',
      'micbox','micStatus','micHeardText',
-     'provBrowser','provCloud','cloudBox','apiKey','apiSave','apiShow','apiTest',
+     'keyWarn','apiKey','apiSave','apiShow','apiTest',
      'apiClear','apiStatus','voiceA','voiceB','voiceLoad','voiceProbe',
      'usage','cacheClear','usageReset']
       .forEach(id => el[id] = document.getElementById(id));
@@ -670,14 +868,9 @@ const App = (() => {
     el.reset.onclick = resetProgress;
     el.qtext.addEventListener('keydown', e => { if (e.key === 'Enter') askByText(); });
 
-    /* --- Stimmen-Einstellungen --- */
-    el.provBrowser.onchange = () => { if (el.provBrowser.checked) { cfg.provider = 'browser'; cfgSpeichern(); } };
-    el.provCloud.onchange   = () => {
-      if (!el.provCloud.checked) return;
-      cfg.provider = 'cloud'; cfgSpeichern();
-      if (!cfg.apiKey) apiStatus('Trag deinen API-Schlüssel ein und sichere ihn.', 'bad');
-    };
-
+    /* --- Stimmen-Einstellungen ---
+       Es gibt keine Provider-Umschaltung mehr. Google Cloud ist die einzige
+       Sprachausgabe; die Browser-Stimme wurde auf Ansage entfernt. */
     el.apiSave.onclick = () => {
       const k = (el.apiKey.value || '').trim();
       if (!k) { apiStatus('Das Feld ist leer.', 'bad'); return; }
@@ -752,9 +945,11 @@ const App = (() => {
     }[perm] || perm;
 
     const rows = [
-      ['Stimme A', info.a || '— keine gefunden —'],
-      ['Stimme B', info.b || '— keine gefunden —'],
-      ['Deutsche Stimmen', info.deutsch + ' von ' + info.total],
+      ['Sprachausgabe', 'Google Cloud (Browser-Stimme entfernt)'],
+      ['Stimme A', `${info.a} · ${info.klasseA}`],
+      ['Stimme B', `${info.b} · ${info.klasseB}`],
+      ['Feinsteuerung (SSML)', `A: ${info.ssmlA ? 'ja' : 'nein'} · B: ${info.ssmlB ? 'ja' : 'nein'}`],
+      ['API-Schlüssel', info.schluessel ? 'hinterlegt' : 'FEHLT — keine Sprachausgabe möglich'],
       ['Spracherkennung', info.sttVerfuegbar ? 'verfügbar' : 'nicht verfügbar'],
       ['Mikrofon-Berechtigung', permText],
       ['Sicherer Kontext (HTTPS)', window.isSecureContext ? 'ja' : 'NEIN — Mikro bleibt gesperrt'],
@@ -762,8 +957,11 @@ const App = (() => {
     ];
     el.diag.innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
 
-    if (info.singleVoiceMode) {
-      el.diag.innerHTML += `<div class="warn">Nur eine deutsche Stimme installiert. Die beiden Sprecher werden ersatzweise über die Tonhöhe unterschieden — das ersetzt keine echte zweite Stimme.</div>`;
+    if (!info.schluessel) {
+      el.diag.innerHTML += `<div class="warn">Ohne API-Schlüssel spricht die App nicht. Das ist Absicht: die Browser-Stimme wurde bewusst entfernt, damit ein Cloud-Fehler nicht mehr still durch schlechtere Qualität ersetzt wird. Schlüssel unter „Stimmen" eintragen.</div>`;
+    }
+    if (!info.ssmlA || !info.ssmlB) {
+      el.diag.innerHTML += `<div class="warn">Mindestens eine gewählte Stimme unterstützt kein SSML (Chirp3-HD kann es grundsätzlich nicht). Für diese Stimme entfallen die feinen Pausen zwischen den Sätzen — sie wird mit reinem Text angesteuert. Das ist kein Fehler, sondern eine Eigenschaft der Stimmenklasse.</div>`;
     }
     if (perm === 'denied') {
       el.diag.innerHTML += `<div class="warn">Das Mikrofon ist für diese Seite blockiert. In Chrome: Schloss-Symbol links neben der Adresse → Berechtigungen → Mikrofon → Zulassen. Danach die Seite neu laden.</div>`;

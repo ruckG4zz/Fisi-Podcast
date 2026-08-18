@@ -6,12 +6,17 @@
    WICHTIG zur Einordnung: Offline ist damit nur die OBERFLÄCHE plus der
    Skript-Text. Die Spracherkennung (STT) braucht trotzdem eine
    Internetverbindung, weil Chrome das Audio serverseitig verarbeitet.
-   Die Sprachausgabe (TTS) läuft je nach installierter Stimme lokal.
+
+   Die Sprachausgabe läuft seit 18.08.2026 ausschließlich über Google
+   Cloud TTS — die Browser-Stimme wurde entfernt. Bereits gehörte
+   Abschnitte bleiben trotzdem offline abspielbar, weil jedes Segment
+   nach der ersten Synthese als fertige Audiodatei im Gerätespeicher
+   (IndexedDB) liegt. Neue, noch nie gehörte Abschnitte brauchen Netz.
    ========================================================================== */
 
 /* Cache-Name bei JEDER Änderung an den Dateien hochzählen — sonst liefert
    der Service Worker hartnäckig die alte Fassung aus. */
-const CACHE = 'fisi-podcast-l1-v5';
+const CACHE = 'fisi-podcast-l1-v6';
 
 const ASSETS = [
   './',

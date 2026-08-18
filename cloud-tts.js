@@ -37,6 +37,58 @@ const CloudTTS = (() => {
   /* USD je 1 Mio. Zeichen oberhalb des Freikontingents */
   const PREIS_PRO_MIO   = { Wavenet: 4, Neural2: 16, Standard: 4, Studio: 160, Chirp3: 30 };
 
+  /* ---------------------------------------------------------------------
+     WAS JEDE STIMMENKLASSE TATSAECHLICH KANN
+     (Stand 18.08.2026, Google-Doku "Supported voices and languages")
+
+     Das ist kein Schoenheitsdetail, sondern verhindert echte Fehler:
+     Chirp3-HD lehnt speakingRate und pitch ab. Wurden sie trotzdem
+     mitgeschickt, scheiterte die Anfrage — und die App fiel still auf
+     eine andere Stimme zurueck, ohne dass man den Grund sah.
+
+     SSML:  Chirp3-HD unterstuetzt es nicht.
+            Studio unterstuetzt es, aber OHNE <lang>, <emphasis>,
+            <prosody pitch> und <mark>.
+     Deshalb ist ein sprachlicher Wechsel per <lang xml:lang="en-US">
+     mit KEINER der beiden hier genutzten Stimmen moeglich. Englische
+     Begriffe werden stattdessen ueber die Aussprachetabelle in
+     speech.js geformt.
+     --------------------------------------------------------------------- */
+  const FAEHIGKEITEN = {
+    Chirp3:   { ssml: false, rate: false, pitch: false },
+    Studio:   { ssml: true,  rate: true,  pitch: false },
+    Neural2:  { ssml: true,  rate: true,  pitch: true  },
+    Wavenet:  { ssml: true,  rate: true,  pitch: true  },
+    Standard: { ssml: true,  rate: true,  pitch: true  }
+  };
+
+  function faehigkeiten(stimmenName) {
+    return FAEHIGKEITEN[klasseAusName(stimmenName)] || FAEHIGKEITEN.Standard;
+  }
+
+  /* XML-Sonderzeichen entschaerfen, sonst zerlegt ein & das ganze SSML. */
+  function xmlEscape(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /* ---------------------------------------------------------------------
+     Atem-Politur (nur fuer Klassen, die SSML koennen)
+     Setzt kurze Pausen an Satzgrenzen und nach Doppelpunkten. Ohne das
+     klingen aufeinanderfolgende Saetze gehetzt aneinandergeklebt.
+     Bewusst zurueckhaltend dosiert — zu lange Pausen wirken schlafend.
+     --------------------------------------------------------------------- */
+  function alsSSML(text) {
+    let t = xmlEscape(text);
+    t = t.replace(/([.!?])\s+/g, '$1<break time="320ms"/> ');
+    t = t.replace(/([:;])\s+/g,  '$1<break time="200ms"/> ');
+    t = t.replace(/,\s+/g,       ',<break time="120ms"/> ');
+    return '<speak>' + t + '</speak>';
+  }
+
   let db = null;
 
   /* ---------------------------------------------------------------------
@@ -180,10 +232,15 @@ const CloudTTS = (() => {
     if (!opts.apiKey) throw new Error('Kein API-Schlüssel hinterlegt.');
 
     const stimme = opts.voice || 'de-DE-Wavenet-B';
-    const rate   = opts.rate  != null ? opts.rate  : 1.0;
-    const pitch  = opts.pitch != null ? opts.pitch : 0;
+    const kann   = faehigkeiten(stimme);
 
-    const cacheKey = 'v1:' + stimme + ':' + rate + ':' + pitch + ':' + hash(roh);
+    /* Nur senden, was die Stimme auch annimmt (siehe FAEHIGKEITEN oben). */
+    const rate  = (kann.rate  && opts.rate  != null) ? opts.rate  : null;
+    const pitch = (kann.pitch && opts.pitch != null) ? opts.pitch : null;
+    const ssml  = kann.ssml && opts.ssml !== false;
+
+    const cacheKey = 'v2:' + stimme + ':' + (rate == null ? '-' : rate) + ':' +
+                     (pitch == null ? '-' : pitch) + ':' + (ssml ? 's' : 't') + ':' + hash(roh);
 
     /* 1. Zuerst im Cache nachsehen — kostenlos. */
     const treffer = await ausCacheHolen(cacheKey);
@@ -195,13 +252,17 @@ const CloudTTS = (() => {
     }
 
     /* 2. Nur wenn nichts im Cache liegt, wird tatsaechlich synthetisiert. */
+    const audioConfig = { audioEncoding: 'MP3' };
+    if (rate  != null) audioConfig.speakingRate = rate;
+    if (pitch != null) audioConfig.pitch        = pitch;
+
     const antwort = await fetch(ENDPOINT + '?key=' + encodeURIComponent(opts.apiKey), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        input: { text: roh },
+        input: ssml ? { ssml: alsSSML(roh) } : { text: roh },
         voice: { languageCode: 'de-DE', name: stimme },
-        audioConfig: { audioEncoding: 'MP3', speakingRate: rate, pitch: pitch }
+        audioConfig
       })
     });
 
@@ -222,12 +283,18 @@ const CloudTTS = (() => {
     /* 3. Merken, damit dieser Text nie ein zweites Mal Geld kostet. */
     await inCacheLegen(cacheKey, url);
 
+    /* WICHTIG fuer die ehrliche Verbrauchsanzeige: Google zaehlt bei SSML
+       die AUSZEICHNUNG MIT, nicht nur den gesprochenen Text. Deshalb wird
+       hier die tatsaechlich gesendete Laenge verbucht, nicht die des
+       Rohtexts — sonst zeigt die App zu wenig Verbrauch an. */
+    const berechnet = ssml ? alsSSML(roh).length : roh.length;
+
     const z = ladeZaehler();
-    z.zeichen += roh.length;
+    z.zeichen += berechnet;
     z.aufrufe += 1;
     speichereZaehler(z);
 
-    return { url, ausCache: false, zeichen: roh.length };
+    return { url, ausCache: false, zeichen: berechnet };
   }
 
   function deutlicherFehler(status, detail) {
@@ -303,7 +370,8 @@ const CloudTTS = (() => {
   return {
     synthese, stimmenListe, verbrauch, zaehlerZuruecksetzen,
     cacheLeeren, cacheGroesse, kostenSchaetzung, klasseAusName,
-    FREI_KONTINGENT, PREIS_PRO_MIO
+    faehigkeiten, alsSSML,
+    FREI_KONTINGENT, PREIS_PRO_MIO, FAEHIGKEITEN
   };
 })();
 

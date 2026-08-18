@@ -1,46 +1,57 @@
 /* =============================================================================
    FISI-Podcast-App — Sprach-Abstraktionsschicht
    -----------------------------------------------------------------------------
-   Kapselt KOMPLETT die Web Speech API. Der Rest der App kennt nur:
+   Der Rest der App kennt nur:
 
        Speech.speak(text, {voice:'a'|'b'})   -> Promise (resolved wenn fertig)
+       Speech.prefetch(text, {voice:...})    -> laedt das NAECHSTE Segment vor
        Speech.stop()
        Speech.pause() / Speech.resume()
        Speech.listen()                       -> Promise<string> (Transkript)
        Speech.cancelListen()
-       Speech.init()                         -> Promise (Stimmen geladen)
-       Speech.voiceInfo()                    -> Diagnose für die UI
+       Speech.init()                         -> Promise (Startdiagnose)
+       Speech.voiceInfo()                    -> Diagnose fuer die UI
 
-   Zweck der Kapselung (Architektur-Vorgabe aus der Projekt-Notiz):
-   Ein späterer Wechsel auf eine Cloud-TTS ist ein Austausch DIESER Datei,
-   kein Umbau der App. Nirgends sonst wird speechSynthesis angefasst.
+   -----------------------------------------------------------------------------
+   AENDERUNG 18.08.2026 (auf ausdrueckliche Ansage von ruckG4zz):
 
-   Kostenpolitik: Diese Implementierung ist zu 100% kostenneutral
-   (Browser-Bordmittel). Keine kostenpflichtige API wird angesprochen.
+   Die Browser-Stimme (Web Speech API / speechSynthesis) ist als Sprachausgabe
+   KOMPLETT ENTFERNT. Es gibt keinen stillen Rueckfall mehr.
+
+   Warum das gewollt ist: der bisherige Rueckfall hat Cloud-Fehler unsichtbar
+   gemacht. Man hoerte etwas, es klang nur schlechter — und niemand konnte
+   sagen warum. Jetzt gilt: geht die Cloud nicht, kommt KEIN Ton, dafuer eine
+   klare Fehlermeldung. Lieber ehrliche Stille als heimlich schlechtere Qualitaet.
+
+   Folge, die man kennen muss: ohne eingetragenen API-Schluessel spricht die
+   App gar nicht. Das ist Absicht, kein Defekt.
+
+   Die SPRACHERKENNUNG (SpeechRecognition) bleibt unveraendert erhalten —
+   die ist kostenlos, funktioniert gut und hat mit der Ausgabe nichts zu tun.
    ========================================================================== */
 
 const Speech = (() => {
 
-  const synth = window.speechSynthesis;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-  let voices        = [];
-  let voiceA        = null;   // "männlich"
-  let voiceB        = null;   // "weiblich"
-  let singleVoiceMode = false; // nur eine dt. Stimme gefunden -> Pitch-Trick
-  let recognition   = null;
-  let keepAliveTimer = null;
-  let currentUtter  = null;
+  let recognition = null;
+
   /* Zaehler zum Entwerten laufender UND erst geplanter Sprechvorgaenge.
-     Noetig, weil zwischen speak() und dem tatsaechlichen Start eine kurze
-     Verzoegerung liegt (siehe unten) — ein stop() in genau diesem Fenster
-     wuerde sonst wirkungslos verpuffen und die Ausgabe liefe trotzdem los. */
-  let speakGen      = 0;
+     Zwischen speak() und dem tatsaechlichen Abspielen liegt ein await
+     (Cache-Zugriff oder Google-Anfrage) — ein stop() in genau diesem
+     Fenster wuerde sonst wirkungslos verpuffen und die Ausgabe liefe
+     trotzdem los. */
+  let speakGen = 0;
 
   /* ---------------------------------------------------------------------
      Aussprache-Korrekturen
-     Der Skript-Text bleibt lesbar; hier wird zentral repariert, was
-     deutsche TTS-Engines sonst verstümmeln. Wächst mit der Nutzung.
+     Der Skript-Text bleibt lesbar; hier wird zentral repariert, was eine
+     deutsche TTS-Stimme sonst verstuemmelt.
+
+     WICHTIG — das ist neu: diese Tabelle wurde frueher NUR auf die
+     Browser-Stimme angewendet, die Cloud-Stimme bekam den Rohtext.
+     "LWL" ging also ungefiltert an Google. Jetzt laeuft jeder Text hier
+     durch, egal welche Stimme.
      --------------------------------------------------------------------- */
   const TTS_FIX = [
     [/\bLWL\b/g,        'L-W-L'],
@@ -76,132 +87,88 @@ const Speech = (() => {
     [/\s+/g,            ' ']
   ];
 
+  /* ---------------------------------------------------------------------
+     ENGLISCHE FACHBEGRIFFE — Aussprache-Feinschliff
+     -----------------------------------------------------------------------
+     Ziel (Vorgabe ruckG4zz): deutsche Begriffe bleiben deutsch, aber ein
+     REINER englischer Fachbegriff soll auch englisch klingen, statt steif
+     eingedeutscht vorgelesen zu werden.
+
+     WARUM DIESE TABELLE VORERST LEER IST — das ist Absicht, kein Vergessen:
+
+     Der saubere Weg waere SSML mit <lang xml:lang="en-US">. Genau das
+     unterstuetzt aber KEINE der beiden gewaehlten Stimmen: Chirp3-HD kann
+     gar kein SSML, und Studio unterstuetzt SSML ausdruecklich OHNE <lang>.
+     (Google-Doku, geprueft 18.08.2026.)
+
+     Bleibt die lautschriftliche Umschreibung — also z.B. "Full Duplex"
+     als "Full Djuplex" zu schreiben, damit es englisch klingt. Das ist
+     aber ein zweischneidiges Schwert: Chirp3-HD und Studio sind moderne
+     Modelle, die englische Begriffe im deutschen Satz oft schon von sich
+     aus korrekt aussprechen. Eine "Korrektur" wuerde es dann VERSCHLECHTERN.
+
+     Deshalb wird hier nichts auf Verdacht eingetragen. Die Tabelle wird
+     gezielt gefuellt, nachdem ruckG4zz eine echte Hoerprobe gemacht und
+     benannt hat, welche Begriffe tatsaechlich falsch klingen.
+     Format:  [/\bFull Duplex\b/g, 'Full Djuplex']
+     --------------------------------------------------------------------- */
+  const ENGLISCH_FIX = [
+    // absichtlich leer — wird nach der Hoerprobe befuellt, siehe oben
+  ];
+
   function fixForTTS(text) {
     let t = ' ' + text + ' ';
-    for (const [re, rep] of TTS_FIX) t = t.replace(re, rep);
+    for (const [re, rep] of ENGLISCH_FIX) t = t.replace(re, rep);
+    for (const [re, rep] of TTS_FIX)      t = t.replace(re, rep);
     return t.trim();
   }
 
-  /* ---------------------------------------------------------------------
-     Stimmen laden. getVoices() ist in Chrome asynchron befüllt.
-     --------------------------------------------------------------------- */
-  function loadVoices() {
-    return new Promise(resolve => {
-      const grab = () => {
-        const v = synth.getVoices();
-        if (v && v.length) { resolve(v); return true; }
-        return false;
-      };
-      if (grab()) return;
-      let tries = 0;
-      const iv = setInterval(() => {
-        if (grab() || ++tries > 20) { clearInterval(iv); resolve(synth.getVoices() || []); }
-      }, 150);
-      synth.onvoiceschanged = () => { if (grab()) clearInterval(iv); };
-    });
-  }
-
-  /* Heuristik: Geschlecht anhand bekannter Stimm-Namen. */
-  const FEMALE_HINTS = ['katja','hedda','anna','marlene','petra','vicki','female','frau','google deutsch'];
-  const MALE_HINTS   = ['conrad','stefan','markus','klaus','male','mann','bernd','yannick'];
-
-  function pickVoices() {
-    const de = voices.filter(v => (v.lang || '').toLowerCase().startsWith('de'));
-    const pool = de.length ? de : voices;
-
-    const scoreFemale = v => FEMALE_HINTS.some(h => v.name.toLowerCase().includes(h));
-    const scoreMale   = v => MALE_HINTS.some(h => v.name.toLowerCase().includes(h));
-
-    voiceB = pool.find(scoreFemale) || null;   // weiblich
-    voiceA = pool.find(scoreMale)   || null;   // männlich
-
-    // Auffüllen mit dem, was übrig ist
-    if (!voiceA) voiceA = pool.find(v => v !== voiceB) || pool[0] || null;
-    if (!voiceB) voiceB = pool.find(v => v !== voiceA) || pool[0] || null;
-
-    singleVoiceMode = !voiceA || !voiceB || voiceA === voiceB;
-  }
-
-  /* ---------------------------------------------------------------------
-     Chrome-Bug-Workaround: speechSynthesis stoppt lange Utterances nach
-     ca. 15 s. Gegenmittel auf DESKTOP: regelmäßig pause()+resume() antickern.
-
-     WICHTIG: Dieser Trick ist Desktop-Chrome-spezifisch. Auf Android-Chrome
-     bricht ein erzwungenes pause()+resume() die Sprachausgabe nachweislich
-     eher komplett ab, statt sie zu retten (beobachtet: Abbruch nach dem
-     ersten kurzen Segment, exakt im 10s-Timer-Takt). Deshalb läuft der
-     Trick NUR auf Desktop-Browsern; Mobile bleibt bewusst ohne Eingriff,
-     weil dort die 15s-Bugvariante ohnehin nicht in gleicher Form auftritt.
-     --------------------------------------------------------------------- */
   const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
 
-  function startKeepAlive() {
-    stopKeepAlive();
-    if (IS_MOBILE) return;   // auf Mobile bewusst kein Eingriff, siehe oben
-    keepAliveTimer = setInterval(() => {
-      // Selbstheilend statt erzwingend: nur eingreifen, wenn der Browser
-      // selbst schon pausiert hat (das ist der eigentliche Bugfall).
-      if (synth.paused) { synth.resume(); }
-      else if (synth.speaking) { synth.pause(); synth.resume(); }
-    }, 10000);
-  }
-  function stopKeepAlive() {
-    if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
-  }
-
   /* =====================================================================
-     ÖFFENTLICHE API
-     ===================================================================== */
-
-  async function init() {
-    if (!synth) throw new Error('SpeechSynthesis wird von diesem Browser nicht unterstützt.');
-    voices = await loadVoices();
-    pickVoices();
-    return voiceInfo();
-  }
-
-  function voiceInfo() {
-    return {
-      total: voices.length,
-      deutsch: voices.filter(v => (v.lang || '').toLowerCase().startsWith('de')).length,
-      a: voiceA ? voiceA.name : null,
-      b: voiceB ? voiceB.name : null,
-      singleVoiceMode,
-      sttVerfuegbar: !!SR
-    };
-  }
-
-  /* =====================================================================
-     STIMMEN-QUELLE (Provider)
+     CLOUD-KONFIGURATION
      ---------------------------------------------------------------------
-     'browser' = Web Speech API, kostenlos, aber monoton und bricht bei
-                 gesperrtem Bildschirm ab (kein Media-Element).
-     'cloud'   = Google Cloud TTS. Liefert fertige MP3-Daten, die in einem
-                 ECHTEN <audio>-Element abgespielt werden — deshalb laeuft
-                 die Wiedergabe bei gesperrtem Bildschirm weiter.
-
      Der Schluessel wird ausschliesslich von aussen gesetzt (aus dem
-     Geraetespeicher, den ruckG4zz selbst befuellt). Hier steht keiner drin.
+     Geraetespeicher, den ruckG4zz selbst befuellt). Hier steht keiner drin
+     und es gibt keinen eingebauten Standardschluessel.
+
+     Stimmen-Voreinstellung: von ruckG4zz am 18.08.2026 nach eigenem
+     Hoervergleich festgelegt.
      ===================================================================== */
-  let provider = 'browser';
-  const cloudConfig = { apiKey: null, voiceA: 'de-DE-Wavenet-B', voiceB: 'de-DE-Wavenet-F', rate: 1.0 };
+  const cloudConfig = {
+    apiKey: null,
+    voiceA: 'de-DE-Chirp3-HD-Enceladus',   // maennlich
+    voiceB: 'de-DE-Studio-C',              // weiblich
+    rate: 1.0
+  };
+
   let letzterCloudFehler = null;
 
-  function setProvider(p) { provider = (p === 'cloud') ? 'cloud' : 'browser'; }
-  function getProvider()  { return provider; }
   function setCloudConfig(cfg) { Object.assign(cloudConfig, cfg || {}); }
-  function getCloudConfig() { return Object.assign({}, cloudConfig, { apiKey: cloudConfig.apiKey ? '(gesetzt)' : null }); }
-  function cloudAktiv() { return provider === 'cloud' && !!cloudConfig.apiKey; }
-  function letzterFehler() { return letzterCloudFehler; }
+  function getCloudConfig() {
+    return Object.assign({}, cloudConfig, { apiKey: cloudConfig.apiKey ? '(gesetzt)' : null });
+  }
+  function cloudAktiv()   { return !!cloudConfig.apiKey; }
+  function letzterFehler(){ return letzterCloudFehler; }
+  function stimmeFuer(v)  { return (v === 'b') ? cloudConfig.voiceB : cloudConfig.voiceA; }
 
-  /* Ein einziges, dauerhaftes Audio-Element. Bewusst nicht pro Segment neu:
-     nur so bleibt die Mediensteuerung des Systems daran haengen und die
-     Wiedergabe im Hintergrund erhalten. */
+  /* =====================================================================
+     WIEDERGABE
+     ---------------------------------------------------------------------
+     EIN einziges, dauerhaftes <audio>-Element. Bewusst nicht pro Segment
+     ein neues: nur so bleibt die Mediensitzung des Systems daran haengen
+     und die Wiedergabe bei gesperrtem Bildschirm ueberhaupt moeglich.
+     ===================================================================== */
   let player = null;
+
   function holePlayer() {
     if (!player) {
       player = new Audio();
       player.preload = 'auto';
+      // Verhindert, dass iOS/Android die Wiedergabe in einen Vollbild-
+      // Videoplayer zwingt — waere hier sinnlos und stoert die Steuerung.
+      player.playsInline = true;
+      player.setAttribute('playsinline', '');
     }
     return player;
   }
@@ -230,200 +197,147 @@ const Speech = (() => {
     });
   }
 
-  async function speakCloud(text, opts) {
-    const myGen = speakGen;
-    const stimme = (opts.voice === 'b') ? cloudConfig.voiceB : cloudConfig.voiceA;
+  /* ---------------------------------------------------------------------
+     VORABLADEN — der eigentliche Hebel gegen den Abbruch bei gesperrtem
+     Bildschirm.
+
+     PROBLEM VORHER: Zwischen zwei Segmenten lag eine echte Luecke. Erst
+     wenn Segment N fertig war, wurde Segment N+1 bei Google angefragt
+     (Netzzugriff, mehrere hundert Millisekunden). In dieser Luecke spielt
+     das <audio>-Element nichts ab. Android wertet das als "Wiedergabe
+     beendet", gibt den Audio-Fokus frei und friert die Seite im
+     Hintergrund ein — der angefangene Satz lief noch zu Ende, danach war
+     Schluss. Exakt das von ruckG4zz beobachtete Verhalten.
+
+     LOESUNG: Das naechste Segment wird schon WAEHREND des laufenden
+     synthetisiert und im Geraetespeicher abgelegt. Beim Segmentwechsel
+     kommt es dann aus dem lokalen Zwischenspeicher statt aus dem Netz —
+     die Luecke schrumpft von "Netzanfrage" auf "Datenbankzugriff".
+
+     Kontingent-Hinweis: Vorabladen loest KEINE zusaetzliche Synthese aus.
+     Es zieht denselben Abruf nur zeitlich vor. Es wird also kein einziges
+     Zeichen zusaetzlich verbraucht.
+     --------------------------------------------------------------------- */
+  async function prefetch(text, opts = {}) {
+    if (!cloudAktiv()) return null;
+    const roh = (text || '').trim();
+    if (!roh) return null;
     try {
-      const erg = await CloudTTS.synthese(text, {
+      const erg = await CloudTTS.synthese(fixForTTS(roh), {
         apiKey: cloudConfig.apiKey,
-        voice: stimme,
-        rate: opts.rate != null ? opts.rate : cloudConfig.rate
+        voice:  stimmeFuer(opts.voice),
+        rate:   opts.rate != null ? opts.rate : cloudConfig.rate
       });
-      if (myGen !== speakGen) return { stopped: true };   // zwischenzeitlich gestoppt
-      letzterCloudFehler = null;
-      return await spieleUrl(erg.url, myGen);
-    } catch (e) {
-      /* Cloud fehlgeschlagen: NICHT verstummen, sondern hoerbar auf die
-         kostenlose Browserstimme zurueckfallen. Der Fehler wird gemerkt
-         und in der Oberflaeche angezeigt, damit er nicht still bleibt. */
-      letzterCloudFehler = (e && e.message) || 'Unbekannter Cloud-Fehler';
-      if (myGen !== speakGen) return { stopped: true };
-      const r = await speakBrowser(text, opts);
-      return Object.assign({}, r, { cloudFehler: letzterCloudFehler });
+      return erg.url;
+    } catch (_) {
+      // Vorabladen ist Komfort, kein Muss. Faellt es aus, versucht es
+      // speak() gleich noch einmal — dann eben mit sichtbarem Fehler.
+      return null;
     }
   }
 
   /**
    * Spricht einen Text. Resolved, wenn fertig gesprochen.
-   * Waehlt automatisch die eingestellte Stimmen-Quelle.
+   * NUR Cloud — kein Rueckfall auf die Browser-Stimme (siehe Kopf).
    */
-  function speak(text, opts = {}) {
-    if (cloudAktiv()) return speakCloud(text, opts);
-    return speakBrowser(text, opts);
-  }
+  async function speak(text, opts = {}) {
+    const myGen = speakGen;
 
-  /**
-   * Spricht einen Text ueber die Browser-Stimme. Resolved, wenn fertig.
-   * Bei stop() resolved die Promise ebenfalls (mit {stopped:true}),
-   * damit der Aufrufer nicht hängen bleibt.
-   */
-  function speakBrowser(text, opts = {}) {
-    return new Promise(resolve => {
-      if (!synth) return resolve({ stopped: true, error: 'kein TTS' });
+    if (!cloudAktiv()) {
+      letzterCloudFehler = 'Kein API-Schlüssel hinterlegt. Ohne Schlüssel gibt es keine Sprachausgabe.';
+      return { stopped: true, error: 'kein-schluessel', cloudFehler: letzterCloudFehler };
+    }
 
-      const spoken = fixForTTS(text);
-      const useB   = opts.voice === 'b';
-      const v      = useB ? voiceB : voiceA;
+    const roh = (text || '').trim();
+    if (!roh) return { stopped: false };
 
-      const myGen    = speakGen;   // wird durch stop() entwertet
-      let done       = false;
-      let retried    = false;
-      let active     = null;   // aktuell laufende Utterance
-      let startTimer = null;
-      let endTimer   = null;
-
-      /* Grosszuegige Obergrenze fuer die Sprechdauer. Deutsche TTS schafft
-         grob 10–14 Zeichen/Sekunde; hier wird bewusst reichlich Luft
-         gelassen, das ist nur ein Notausstieg gegen ewiges Haengen. */
-      const maxDauer = Math.max(20000, Math.round(spoken.length / 8 * 1000) + 15000);
-
-      const clearTimers = () => {
-        if (startTimer) { clearTimeout(startTimer); startTimer = null; }
-        if (endTimer)   { clearTimeout(endTimer);   endTimer   = null; }
-      };
-
-      const finish = (payload) => {
-        if (done) return; done = true;
-        clearTimers();
-        stopKeepAlive();
-        if (currentUtter === active) currentUtter = null;
-        resolve(payload);
-      };
-
-      const build = () => {
-        const u = new SpeechSynthesisUtterance(spoken);
-        if (v) u.voice = v;
-        u.lang   = (v && v.lang) || 'de-DE';
-        u.rate   = opts.rate   != null ? opts.rate   : 0.98;
-        u.volume = opts.volume != null ? opts.volume : 1;
-
-        // Nur eine deutsche Stimme vorhanden? Dann werden die beiden
-        // Sprecher über die Tonhöhe unterscheidbar gemacht (Notbehelf,
-        // ersetzt keine echte zweite Stimme — wird in der UI benannt).
-        if (opts.pitch != null)   u.pitch = opts.pitch;
-        else if (singleVoiceMode) u.pitch = useB ? 1.18 : 0.88;
-        else                      u.pitch = 1;
-
-        u.onstart = () => {
-          if (u !== active) return;
-          if (startTimer) { clearTimeout(startTimer); startTimer = null; }
-          // Erst wenn wirklich gesprochen wird, den Ende-Notausstieg scharf schalten.
-          endTimer = setTimeout(() => finish({ stopped: true, error: 'tts-timeout' }), maxDauer);
-        };
-
-        /* Ob diese Äußerung regulär zu Ende kam, wird an IHR SELBST
-           festgemacht — nicht an einem geteilten Flag. Sonst meldet eine
-           durch cancel() abgeräumte Utterance faelschlich "sauber fertig",
-           und der Player springt ein Segment zu weit. */
-        u.onend = () => {
-          if (u !== active) return;          // verworfener Retry-Rest
-          finish({ stopped: currentUtter !== u });
-        };
-        u.onerror = (e) => {
-          if (u !== active) return;
-          // 'interrupted'/'canceled' sind normale Folgen von stop() — kein echter Fehler.
-          const benign = e && (e.error === 'interrupted' || e.error === 'canceled');
-          finish({ stopped: true, error: benign ? null : (e && e.error) || 'tts-fehler' });
-        };
-        return u;
-      };
-
-      /* -----------------------------------------------------------------
-         Start mit Watchdog.
-
-         CHROME-EIGENHEIT: Ein speak() unmittelbar nach einem cancel() oder
-         direkt nach einer gerade beendeten Äußerung wird gelegentlich
-         KOMPLETT verschluckt — es kommt weder Ton noch onend noch onerror.
-         Ohne Gegenmassnahme haengt die Promise dann fuer immer und der
-         gesamte Ablauf danach (z.B. "Podcast fortsetzen") laeuft nie.
-
-         Deshalb: kommt binnen 1,5 s kein onstart und spricht der Browser
-         auch sonst nicht, wird EINMAL sauber neu angesetzt. Klappt auch
-         das nicht, wird die Promise trotzdem aufgeloest — lieber ein
-         uebersprungener Satz als ein toter Player.
-         ----------------------------------------------------------------- */
-      const launch = () => {
-        if (done) return;
-        // Zwischenzeitlich gestoppt? Dann gar nicht erst losreden.
-        if (myGen !== speakGen) return finish({ stopped: true });
-        active = build();
-        currentUtter = active;
-        try { synth.speak(active); }
-        catch (e) { return finish({ stopped: true, error: 'speak-fehler: ' + (e && e.message) }); }
-        startKeepAlive();
-
-        startTimer = setTimeout(() => {
-          if (done) return;
-          if (myGen !== speakGen) return finish({ stopped: true });
-          if (synth.speaking || synth.pending) return;   // laeuft doch, nur onstart blieb aus
-          if (!retried) {
-            retried = true;
-            try { synth.cancel(); } catch (_) {}
-            setTimeout(launch, 160);
-          } else {
-            finish({ stopped: true, error: 'tts-start-fehlgeschlagen' });
-          }
-        }, 1500);
-      };
-
-      /* Immer eine kurze Atempause vor dem Sprechen: raeumt Reste ab und
-         gibt Chrome Zeit, sich zu sortieren. Klingt im Podcast ohnehin
-         natuerlicher als ein hartes Aneinanderkleben zweier Saetze. */
-      if (synth.speaking || synth.pending) {
-        try { synth.cancel(); } catch (_) {}
-        setTimeout(launch, 200);
-      } else {
-        setTimeout(launch, 80);
-      }
-    });
+    try {
+      const erg = await CloudTTS.synthese(fixForTTS(roh), {
+        apiKey: cloudConfig.apiKey,
+        voice:  stimmeFuer(opts.voice),
+        rate:   opts.rate != null ? opts.rate : cloudConfig.rate
+      });
+      if (myGen !== speakGen) return { stopped: true };   // zwischenzeitlich gestoppt
+      letzterCloudFehler = null;
+      return await spieleUrl(erg.url, myGen);
+    } catch (e) {
+      /* KEIN stiller Rueckfall mehr. Der Fehler wird gemerkt, nach oben
+         gereicht und in der Oberflaeche sichtbar gemacht. */
+      letzterCloudFehler = (e && e.message) || 'Unbekannter Cloud-Fehler';
+      return { stopped: true, error: 'cloud-fehler', cloudFehler: letzterCloudFehler };
+    }
   }
 
   function stop() {
     // Generation hochzaehlen: entwertet auch Sprechvorgaenge, die noch in
-    // der kurzen Anlaufverzoegerung stecken und sonst trotzdem loslegen wuerden.
+    // der Synthese haengen und sonst danach trotzdem losspielen wuerden.
     speakGen++;
-    // Referenz ZUERST loesen: der gleich feuernde onend-Handler prueft
-    // currentUtter und meldet dadurch korrekt "abgebrochen" statt "fertig".
-    currentUtter = null;
-    stopKeepAlive();
-    if (synth) synth.cancel();
-    // Auch die Cloud-Wiedergabe anhalten, sonst redet sie beim
-    // Mikrofon-Druck munter weiter.
-    if (player) { try { player.pause(); } catch (_) {} }
+    if (player) {
+      try {
+        player.pause();
+        // Position zuruecksetzen, damit ein spaeteres resume() nicht
+        // mitten im abgebrochenen Satz wieder anfaengt.
+        player.currentTime = 0;
+      } catch (_) {}
+    }
+  }
+
+  /* SOFORT-STOPP fuer die Zwischenfrage.
+     Unterschied zu stop(): hier wird zusaetzlich die Lautstaerke hart auf
+     null gezogen, bevor pausiert wird. Auf Android klingt ein reines
+     pause() gelegentlich noch ein paar Millisekunden nach — das wirkt bei
+     einer Unterbrechung unsauber. */
+  function stopSofort() {
+    if (player) { try { player.volume = 0; } catch (_) {} }
+    stop();
+    if (player) { try { player.volume = 1; } catch (_) {} }
   }
 
   function pause() {
-    if (synth && synth.speaking && !synth.paused) synth.pause();
     if (player && !player.paused) { try { player.pause(); } catch (_) {} }
   }
   function resume() {
-    if (synth && synth.paused) synth.resume();
     if (player && player.paused && player.src) { player.play().catch(() => {}); }
   }
-  function isPaused()   { return !!(synth && synth.paused) || !!(player && player.paused && player.src && !player.ended); }
-  function isSpeaking() { return !!(synth && synth.speaking) || !!(player && player.src && !player.paused && !player.ended); }
+  function isPaused()   { return !!(player && player.paused && player.src && !player.ended); }
+  function isSpeaking() { return !!(player && player.src && !player.paused && !player.ended); }
 
-  /* ---------------------------------------------------------------------
-     Spracherkennung.
-     WICHTIG (Sicherheitsvorgabe): wird ausschließlich durch einen
+  /* =====================================================================
+     START / DIAGNOSE
+     ===================================================================== */
+  async function init() {
+    return voiceInfo();
+  }
+
+  function voiceInfo() {
+    const kannA = (typeof CloudTTS !== 'undefined')
+      ? CloudTTS.faehigkeiten(cloudConfig.voiceA) : null;
+    const kannB = (typeof CloudTTS !== 'undefined')
+      ? CloudTTS.faehigkeiten(cloudConfig.voiceB) : null;
+    return {
+      a: cloudConfig.voiceA,
+      b: cloudConfig.voiceB,
+      klasseA: (typeof CloudTTS !== 'undefined') ? CloudTTS.klasseAusName(cloudConfig.voiceA) : '?',
+      klasseB: (typeof CloudTTS !== 'undefined') ? CloudTTS.klasseAusName(cloudConfig.voiceB) : '?',
+      ssmlA: kannA ? kannA.ssml : false,
+      ssmlB: kannB ? kannB.ssml : false,
+      schluessel: !!cloudConfig.apiKey,
+      sttVerfuegbar: !!SR
+    };
+  }
+
+  /* =====================================================================
+     SPRACHERKENNUNG  (unveraendert — kostenlos, funktioniert)
+     ---------------------------------------------------------------------
+     WICHTIG (Sicherheitsvorgabe): wird ausschliesslich durch einen
      bewussten Aufruf von listen() gestartet, der in der UI hinter einem
-     Tastendruck hängt. Kein Dauerlauschen, kein continuous-Modus.
+     Tastendruck haengt. Kein Dauerlauschen, kein continuous-Modus.
      Hinweis: Chrome verarbeitet das Audio serverseitig (i.d.R. Google).
-     --------------------------------------------------------------------- */
+     ===================================================================== */
+
   /**
    * Fragt den gespeicherten Mikrofon-Berechtigungsstand ab, OHNE eine
-   * Abfrage auszulösen. Nicht jeder Browser kennt das — dann 'unbekannt'.
-   * Rückgabe: 'granted' | 'denied' | 'prompt' | 'unbekannt'
+   * Abfrage auszuloesen. Nicht jeder Browser kennt das — dann 'unbekannt'.
    */
   async function micPermission() {
     try {
@@ -434,14 +348,12 @@ const Speech = (() => {
   }
 
   /**
-   * Fordert den Mikrofonzugriff über den regulären Weg an (getUserMedia)
+   * Fordert den Mikrofonzugriff ueber den regulaeren Weg an (getUserMedia)
    * und gibt den Stream sofort wieder frei.
    *
-   * WARUM DAS NÖTIG IST: Android-Chrome loest die Berechtigungsabfrage bei
+   * WARUM DAS NOETIG IST: Android-Chrome loest die Berechtigungsabfrage bei
    * SpeechRecognition haeufig NICHT selbst aus. Ohne vorher erteilten
-   * Zugriff scheitert die Erkennung dann still — es passiert schlicht
-   * nichts, und der Nutzer sieht nie eine Abfrage. getUserMedia ist der
-   * zuverlaessige Weg, die Abfrage ueberhaupt erst anzustossen.
+   * Zugriff scheitert die Erkennung dann still.
    */
   async function requestMic() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -479,14 +391,16 @@ const Speech = (() => {
       const r = new SR();
       r.lang            = opts.lang || 'de-DE';
       r.continuous      = false;   // bewusst: eine Frage, dann Schluss
-      r.interimResults  = true;    // nur für Live-Anzeige
+      r.interimResults  = true;    // nur fuer Live-Anzeige
       r.maxAlternatives = 3;
 
       let finalText = '';
       let settled   = false;
+      let sicherung = null;
 
       const done = (fn, arg) => {
         if (settled) return; settled = true;
+        if (sicherung) { clearTimeout(sicherung); sicherung = null; }
         try { r.stop(); } catch (_) {}
         recognition = null;
         fn(arg);
@@ -538,8 +452,23 @@ const Speech = (() => {
         })
         .catch(e => done(reject, e));
 
-      // Sicherheitsnetz: nie länger als 12 s offen halten.
-      setTimeout(() => { if (!settled) { try { r.stop(); } catch (_) {} } }, opts.timeout || 12000);
+      /* HARTES Sicherheitsnetz.
+         Vorher wurde hier nur r.stop() aufgerufen und darauf vertraut,
+         dass onend feuert. Tut es das nicht (auf Android beobachtbar,
+         wenn die Erkennung gar nicht erst richtig startet), blieb die
+         Promise fuer immer offen — der Podcast stand dann still.
+         Jetzt wird nach Ablauf zusaetzlich hart aufgeloest. */
+      const grenze = opts.timeout || 12000;
+      sicherung = setTimeout(() => {
+        if (settled) return;
+        try { r.stop(); } catch (_) {}
+        // Kurze Gnadenfrist fuer ein noch eintreffendes onend …
+        setTimeout(() => {
+          if (settled) return;
+          status('Zeitlimit erreicht.');
+          done(resolve, finalText.trim());   // ggf. leer -> Aufrufer behandelt das
+        }, 900);
+      }, grenze);
     });
   }
 
@@ -551,15 +480,16 @@ const Speech = (() => {
   }
 
   function sttSupported() { return !!SR; }
-  function ttsSupported() { return !!synth; }
+  function ttsSupported() { return true; }   // Cloud-TTS, an den Schluessel gebunden
 
   return {
-    init, speak, stop, pause, resume, isPaused, isSpeaking,
+    init, speak, prefetch, stop, stopSofort, pause, resume, isPaused, isSpeaking,
     listen, cancelListen, sttSupported, ttsSupported, voiceInfo,
     micPermission, requestMic, isMobile: () => IS_MOBILE,
-    setProvider, getProvider, setCloudConfig, getCloudConfig,
-    cloudAktiv, letzterFehler,
+    setCloudConfig, getCloudConfig, cloudAktiv, letzterFehler,
     holePlayer,               // fuer die Mediensteuerung in app.js
-    _fixForTTS: fixForTTS     // für Diagnose/Tests
+    _fixForTTS: fixForTTS     // fuer Diagnose/Tests
   };
 })();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { Speech };

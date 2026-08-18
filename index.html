@@ -111,6 +111,8 @@ input[type=text]::placeholder{color:var(--fg-dim)}
 .opt em{font-style:normal;font-size:.78rem;color:var(--fg-dim);line-height:1.45}
 .warnbox{background:#1d2a1e;border:1px solid var(--ok);color:#c9f5cf;
   border-radius:10px;padding:10px 12px;font-size:.8rem;line-height:1.5;margin:14px 0 10px}
+.badbox{background:#2a1a1a;border:1px solid var(--bad);color:#ffd2ce;
+  border-radius:10px;padding:10px 12px;font-size:.8rem;line-height:1.5;margin:0 0 12px}
 .vrow{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
 .vrow label{flex:1;min-width:150px;display:flex;flex-direction:column;gap:5px;
   font-size:.8rem;color:var(--fg-dim)}
@@ -278,18 +280,15 @@ footer a{color:var(--accent-dim)}
   <!-- Stimmen-Qualität -->
   <div class="card">
     <h2>Stimmen</h2>
-    <div class="voicepick">
-      <label class="opt">
-        <input type="radio" name="prov" id="provBrowser" value="browser" checked>
-        <span><b>Browser-Stimme</b><em>kostenlos, aber monoton — stoppt bei gesperrtem Bildschirm</em></span>
-      </label>
-      <label class="opt">
-        <input type="radio" name="prov" id="provCloud" value="cloud">
-        <span><b>Google Cloud (WaveNet)</b><em>deutlich natürlicher — läuft auch bei gesperrtem Bildschirm weiter</em></span>
-      </label>
+
+    <div id="keyWarn" class="badbox" hidden>
+      <strong>Ohne API-Schlüssel gibt es keine Sprachausgabe.</strong>
+      Die Browser-Stimme wurde bewusst entfernt, damit ein Cloud-Fehler nicht mehr
+      still durch schlechtere Qualität ersetzt wird. Lieber ehrliche Stille als
+      heimlich anderer Klang.
     </div>
 
-    <div id="cloudBox" hidden>
+    <div>
       <div class="warnbox">
         Der Schlüssel wird <strong>nur auf diesem Gerät</strong> gespeichert.
         Er landet nie im Programmcode und nie auf GitHub.
@@ -307,12 +306,18 @@ footer a{color:var(--accent-dim)}
       <div id="apiStatus" class="src-note"></div>
 
       <div class="vrow">
-        <label>Stimme A <span class="vhint">männlich</span>
+        <label>Stimme A <span class="vhint">männlich · Chirp3-HD</span>
           <select id="voiceA"></select>
         </label>
-        <label>Stimme B <span class="vhint">weiblich</span>
+        <label>Stimme B <span class="vhint">weiblich · Studio</span>
           <select id="voiceB"></select>
         </label>
+      </div>
+      <div class="src-note">
+        Beide Stimmen teilen sich Erklären und Nachfragen — die Rollen sind
+        nicht fest verteilt. Hinweis zum Kontingent: Studio-Stimmen haben
+        100.000 Zeichen/Monat im dauerhaften Gratis-Anteil, Chirp3 dagegen
+        1 Mio. Angezeigt wird unten immer das knappere der beiden.
       </div>
       <div class="controls">
         <button id="voiceLoad">Stimmen von Google laden</button>
@@ -339,7 +344,8 @@ footer a{color:var(--accent-dim)}
 
   <footer>
     Faktenquelle: NEINT1-OSI-Enzyklopädie (FINAL), Section <code>sec-l1</code>.<br>
-    Hörfassung, kein erfundener Inhalt. Erstellt und geprüft durch Claude Opus 4.1 · v1
+    Hörfassung, kein erfundener Inhalt. Sprachausgabe ausschließlich Google Cloud TTS.<br>
+    Erstellt und geprüft durch Claude Opus 4.1 · v1.2
   </footer>
 
 </div>
