@@ -1,4 +1,4 @@
-# FISI-Podcast-App — Layer-1-Pilot
+# FISI-Podcast-App — OSI -Modell
 
 Hörfassung der NEINT1-Enzyklopädie, Kapitel **Layer 1 (Bitübertragungsschicht)**.
 PWA, kostenneutral, ohne Fremdcode.
