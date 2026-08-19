@@ -89,21 +89,22 @@ const Speech = (() => {
 
        Jetzt stehen die deutschen Buchstabennamen ausgeschrieben da,
        statt sich auf die Buchstaben-Interpretation der Stimme zu
-       verlassen: Oh-Ess-Ih.
+       verlassen: Oh-Ess-I.
 
-       EHRLICH DAZU: das ist die beste begruendete Annahme, kein
-       Hoerbefund — geprueft werden kann es erst am Handy. Sollte es
-       weiter schief klingen, sind das die naechsten zwei Kandidaten,
-       damit sie nicht neu hergeleitet werden muessen:
-         1. 'Oh Ess Ih'  (Leerzeichen statt Bindestrich, mehr Trennung)
-         2. Regel ganz raus — moderne Chirp3-Stimmen kennen "OSI"
-            womoeglich selbst; dann bleibt aber das Risiko "Ossi".
+       NACHKORREKTUR 19.08.2026, zweiter Anlauf (Hoerbefund ruckG4zz):
+       Der erste Versuch stand auf 'Oh-Ess-Ih' — und das "h" wurde
+       tatsaechlich mitgesprochen, was es schlimmer machte als vorher.
+       Das "h" ist deshalb raus. Ein alleinstehendes "I" nach zwei
+       ausgeschriebenen Silben liest die Stimme als Buchstabennamen,
+       nicht mehr als Vokal — das war beim urspruenglichen "O-S-I" nur
+       deshalb unsicher, weil dort ALLE drei Zeichen einzelne
+       Buchstaben waren.
 
        Die Bindestrich-Variante MUSS zuerst stehen: sonst bleibt in
-       "OSI-Modell" nach der Wortregel ein "Oh-Ess-Ih-Modell" mit
+       "OSI-Modell" nach der Wortregel ein "Oh-Ess-I-Modell" mit
        doppeltem Bindestrich stehen. --------------------------------- */
-    [/\bOSI-/g,         'Oh-Ess-Ih '],
-    [/\bOSI\b/g,        'Oh-Ess-Ih'],
+    [/\bOSI-/g,         'Oh-Ess-I '],
+    [/\bOSI\b/g,        'Oh-Ess-I'],
 
     /* ---------------------------------------------------------------
        LAYER 2 (Sicherungsschicht) — Abkuerzungen, die eine deutsche

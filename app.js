@@ -469,6 +469,62 @@ const App = (() => {
     });
   }
 
+  /* =====================================================================
+     VORABLADEN — jetzt mit Fenster statt nur ein Segment (19.08.2026)
+     ---------------------------------------------------------------------
+     BEFUND VON ruckG4zz nach dem Handy-Test des neuen Einleitungs-
+     Kapitels: "die Pausen sind noch zu lang, es ergibt keinen Erzaehlfluss
+     wie in den L1 bis L3."
+
+     Die Beobachtung ist praeziser, als sie zunaechst klingt. Layer 1 bis 3
+     hat er bereits mehrfach gehoert — dort liegt JEDES Segment fertig im
+     Zwischenspeicher, der Segmentwechsel ist ein Datenbankzugriff von
+     wenigen Millisekunden. Das neue Kapitel war frisch: dort musste jedes
+     Segment erst bei Google geholt werden.
+
+     Warum das Vorabladen den Unterschied bisher nicht aufgefangen hat:
+     es lief genau EIN Segment voraus. Ein kurzer Einwurf ("Verstehe.",
+     "Und dann?") dauert unter einer Sekunde — in dieser Zeit ist die
+     Synthese des naechsten, womoeglich langen Segments nicht fertig.
+     Das Vorabladen kam also genau dort zu spaet, wo die Pause am
+     staerksten stoert: bei schnellem Sprecherwechsel.
+
+     Jetzt laufen VORAB_SEGMENTE Segmente voraus. Damit ueberbruecken auch
+     mehrere kurze Repliken hintereinander noch die Anlaufzeit.
+
+     KOSTEN: unveraendert null zusaetzlich. Jedes Segment wird ohnehin
+     genau einmal synthetisiert, der Zwischenspeicher entscheidet darueber,
+     nicht der Zeitpunkt. Es wird nur frueher geholt, nicht oefter.
+     ===================================================================== */
+  const VORAB_SEGMENTE = 3;
+
+  function vorabladen(layerIdx, chIdx, segIdx) {
+    let pos = [layerIdx, chIdx, segIdx];
+    let ausLayer = layerIdx;
+
+    for (let i = 0; i < VORAB_SEGMENTE; i++) {
+      const np = naechstePosition(pos[0], pos[1], pos[2]);
+      if (!np) return;
+
+      /* Fuehrt der Schritt in eine ANDERE Schicht, liegt dazwischen noch
+         die gesprochene Ueberleitung. Die muss ebenfalls vorab bereit
+         liegen — sonst entsteht ausgerechnet an der Nahtstelle die
+         Luecke, an der Android die Hintergrundwiedergabe abraeumt.
+         Der Text ist deterministisch (siehe uebergangsText), wird also
+         genau einmal synthetisiert. */
+      if (np[0] !== ausLayer) {
+        const brueckentext = uebergangsText(ausLayer);
+        if (brueckentext) Speech.prefetch(brueckentext, { voice: 'b' });
+        ausLayer = np[0];
+      }
+
+      const kommt = segmentTextVon(np[0], np[1], np[2]);
+      if (kommt) Speech.prefetch(kommt.text, { voice: kommt.voice });
+
+      pos = np;
+    }
+  }
+
   async function playLoop() {
     const myGen = ++state.gen;
     state.playing = true;
@@ -545,28 +601,7 @@ const App = (() => {
 
       const jetzt = segmentText(state.chapter, state.segment);
 
-      /* VORABLADEN des naechsten Segments — nicht abwarten, laeuft parallel
-         zum aktuellen Sprechen. Das ist der eigentliche Fix gegen den
-         Abbruch bei gesperrtem Bildschirm: beim Segmentwechsel entsteht
-         dadurch keine Netz-Wartezeit mehr, in der Android die Wiedergabe
-         fuer beendet haelt. Kostet kein zusaetzliches Zeichen, es zieht
-         denselben Abruf nur zeitlich vor. */
-      const np = naechstePosition(state.layer, state.chapter, state.segment);
-      if (np) {
-        const kommt = segmentTextVon(np[0], np[1], np[2]);
-        if (kommt) Speech.prefetch(kommt.text, { voice: kommt.voice });
-
-        /* Fuehrt der naechste Schritt in eine ANDERE Schicht, liegt
-           dazwischen noch die gesprochene Ueberleitung. Die muss ebenfalls
-           vorab bereitliegen — sonst entsteht ausgerechnet an der
-           Nahtstelle die Luecke, an der Android die Hintergrundwiedergabe
-           abraeumt. Kostet kein zusaetzliches Zeichen: der Text ist
-           deterministisch und wird ohnehin genau einmal synthetisiert. */
-        if (np[0] !== state.layer) {
-          const brueckentext = uebergangsText(state.layer);
-          if (brueckentext) Speech.prefetch(brueckentext, { voice: 'b' });
-        }
-      }
+      vorabladen(state.layer, state.chapter, state.segment);
 
       const res = await Speech.speak(jetzt.text, { voice: jetzt.voice });
 
@@ -669,13 +704,22 @@ const App = (() => {
      tatenlos zu bleiben: ein Satz doppelt zu hoeren ist deutlich besser
      als ein Knopf, der nicht reagiert. */
   async function resumePlay() {
+    /* REIHENFOLGE IST HIER KRITISCH (19.08.2026):
+       Speech.resume() ruft player.play() auf. Chrome erlaubt das im
+       Hintergrund nur im SELBEN Arbeitsschritt wie der ausloesende
+       Tastendruck. Alles, was vorher noch ein await einschiebt, verbrennt
+       diese Erlaubnis. Die drei Zeilen darunter sind synchron und deshalb
+       unkritisch — sie stehen trotzdem bewusst NACH dem play(), damit
+       niemand spaeter versehentlich ein await davorsetzt. */
+    const versuch = Speech.resume();
+
     state.paused  = false;
     state.playing = true;
     setPlayUI(true);
     silentKeepAlive(true);
     tickerStart();
 
-    const ok = await Speech.resume();
+    const ok = await versuch;
     if (ok) return true;
 
     log('Fortsetzen wurde vom Browser abgelehnt (' +
@@ -722,14 +766,60 @@ const App = (() => {
      Deshalb wird hier zusaetzlich geprueft, ob tatsaechlich Ton laeuft,
      und im Zweifel neu angeworfen.
      --------------------------------------------------------------------- */
+  /* ===== ZWEITER ANLAUF: PLAY AUF DEM SPERRBILDSCHIRM (19.08.2026) =====
+
+     Der Fix vom 18.08. hat NICHT gereicht — von ruckG4zz erneut gemeldet:
+     "Pause ja, Play nein". Die damalige Erklaerung (play() wird abgelehnt,
+     Fehler wurde verschluckt) war richtig, aber unvollstaendig. Der
+     eingebaute Notfallplan konnte gar nicht funktionieren, und zwar aus
+     einem Grund, der beim Lesen des Codes nicht ins Auge springt:
+
+       resumePlay() -> Notfall -> Speech.stop() -> playLoop()
+                                  -> await Speech.speak(...)
+                                     -> await CloudTTS.synthese(...)   <-- HIER
+                                        -> await IndexedDB-Zugriff
+                                     -> erst DANACH player.play()
+
+     Chrome erteilt die Abspiel-Erlaubnis im Hintergrund nur im selben
+     Arbeitsschritt wie der ausloesende Tastendruck. Der Zwischenspeicher-
+     Zugriff ist asynchron — bis play() drankam, war die Erlaubnis
+     erloschen. Der "Notfallplan" hat also zuverlaessig genau denselben
+     Fehler ausgeloest, den er beheben sollte.
+
+     Der zweite Fehler steckt in der Fallunterscheidung darueber:
+     `if (state.paused)`. Diese Marke setzen WIR, in pausePlay(). Chrome
+     pausiert das Audio-Element auf dem Sperrbildschirm aber teilweise
+     SELBST, ohne unseren Handler aufzurufen. Dann steht state.paused auf
+     false und state.playing auf true, obwohl der Ton laengst steht — und
+     der Code lief in den kaputten Notfallzweig statt ins simple
+     Fortsetzen.
+
+     Beides ist behoben:
+       1. Massgeblich ist der ECHTE Zustand des Audio-Elements
+          (Speech.isPaused()), nicht unsere Marke.
+       2. Fortsetzen laeuft ohne jedes vorheriges await — player.play()
+          ist der erste Aufruf, nicht der letzte.
+
+     EHRLICH: die Mechanik ist begruendet und nachvollziehbar, aber wieder
+     nicht real bestaetigt. Bestaetigen kann das nur ein Handy-Test. */
   function medienPlay() {
     if (state.busy) return;
-    if (state.paused) { resumePlay(); return; }
 
+    /* Steht ein bereits geladener Abschnitt still, ist Fortsetzen immer
+       der richtige Weg — und der einzige, der ohne await auskommt.
+       Die Abspielschleife haengt in diesem Fall noch im await und laeuft
+       von selbst weiter, sobald das Audio-Element 'ended' meldet. */
+    if (Speech.isPaused()) { resumePlay(); return; }
+
+    /* Kein geladener Abschnitt, aber unser Zustand behauptet "laeuft":
+       hier hat Android die Wiedergabe tatsaechlich abgeraeumt. Nur in
+       diesem Fall bleibt der Neustart als einzige Moeglichkeit — er kann
+       im Hintergrund scheitern, ist aber besser als gar nichts. */
     if (state.playing && !Speech.isSpeaking()) {
       log('Die Wiedergabe stand still, obwohl sie laufen sollte — wird neu gestartet.', 'sys');
       Speech.stop();
       state.playing = false;
+      state.paused  = false;
       playLoop();
       return;
     }

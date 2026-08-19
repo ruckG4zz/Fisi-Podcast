@@ -76,13 +76,30 @@ const PODCAST_L1 = {
         { voice: 'a', text: 'Könnte man. Nur löst so jede Schicht genau ein Teilproblem und reicht das Ergebnis nach oben oder unten weiter. Das ist der ganze Gedanke dahinter.' },
         { voice: 'b', text: 'Und was habe ich praktisch davon?' },
         { voice: 'a', text: 'Hersteller A baut Switches, Hersteller B Router, Hersteller C die Software. Solange sich alle an die Schnittstellen zwischen den Schichten halten, funktioniert das zusammen. Genau das ist der Kern von Interoperabilität.' },
+        /* SPRECHFLUSS-UMBAU 19.08.2026 nach dem Handy-Test.
+           Rueckmeldung ruckG4zz: die Schichtliste wird "zu schnell
+           runtergespult" und danach kommt "eine zu grosse Pause zur
+           4. Schicht".
+
+           Ursache war baulich, nicht sprachlich: zwischen Schicht drei
+           und vier stand ein Ein-Wort-Segment ("Weiter."). Jedes Segment
+           ist eine eigene Audiodatei — dieses eine Wort erzeugte also
+           ZWEI Nahtstellen direkt hintereinander, mit einer knapp
+           halben Sekunde Ton dazwischen. Beim Hoeren wirkt das wie eine
+           einzige lange Pause mitten in der Aufzaehlung.
+
+           Jetzt ist die Liste 4 zu 3 auf beide Sprecher geteilt, und der
+           Uebergang wird GESPROCHEN statt verschwiegen ("Die oberen drei
+           uebernehme ich"). Damit gibt es an der Bruchstelle nur noch
+           eine Naht, und die ist mit Text gefuellt.
+
+           Ebenfalls raus: das Ein-Wort-Segment "Naemlich?" weiter unten,
+           aus genau demselben Grund. */
         { voice: 'b', text: 'Dann gehen wir die sieben einmal von unten nach oben durch. Und zwar mit den englischen Namen dazu, weil dir genau die in Prüfungen und Datenblättern begegnen.' },
-        { voice: 'a', text: 'Schicht eins ist die Bitübertragungsschicht, englisch Physical Layer. Schicht zwei die Sicherungsschicht, Data Link Layer. Schicht drei die Vermittlungsschicht, Network Layer.' },
-        { voice: 'b', text: 'Weiter.' },
-        { voice: 'a', text: 'Schicht vier ist die Transportschicht, Transport Layer. Schicht fünf die Sitzungsschicht, Session Layer. Schicht sechs die Darstellungsschicht, Presentation Layer. Und Schicht sieben die Anwendungsschicht, Application Layer.' },
-        { voice: 'b', text: 'Diese Namen kommen ab jetzt nicht mehr doppelt. Einmal solltest du sie aber gehört haben, in beiden Sprachen.' },
-        { voice: 'a', text: 'Und dann kommt der Punkt, der in der IHK-Prüfung wirklich zählt.' },
-        { voice: 'b', text: 'Nämlich?' },
+        { voice: 'a', text: 'Schicht eins ist die Bitübertragungsschicht, englisch Physical Layer. Schicht zwei die Sicherungsschicht, Data Link Layer. Schicht drei die Vermittlungsschicht, Network Layer. Und Schicht vier die Transportschicht, Transport Layer.' },
+        { voice: 'b', text: 'Die oberen drei übernehme ich. Schicht fünf ist die Sitzungsschicht, Session Layer. Schicht sechs die Darstellungsschicht, Presentation Layer. Und Schicht sieben die Anwendungsschicht, Application Layer.' },
+        { voice: 'a', text: 'Doppelt kommen die Namen ab jetzt nicht mehr. Einmal solltest du sie aber in beiden Sprachen gehört haben.' },
+        { voice: 'b', text: 'Und jetzt der Punkt, der in der IHK-Prüfung wirklich zählt. Wie hängen OSI und TCP/IP zusammen?' },
         { voice: 'a', text: 'Der Merksatz: das OSI-Modell ist ein Referenzmodell. Theoretisch, sieben Schichten. TCP/IP dagegen ist das Implementierungsmodell. Praktisch, vier Schichten. Und gefragt wird gerne die Zuordnung zwischen beiden.' },
         { voice: 'b', text: 'Dann nehmen wir die gleich mit. Die TCP/IP-Schicht Anwendung deckt die OSI-Schichten sieben, sechs und fünf ab.' },
         { voice: 'a', text: 'Transport entspricht Schicht vier. Internet entspricht Schicht drei. Und der Netzzugang deckt die Schichten zwei und eins gemeinsam ab.' },
@@ -443,22 +460,28 @@ const PODCAST_L1 = {
         { voice: 'a', text: 'Und mindestens genauso wichtig, was sie nicht tut: keine Adressen, keine Frames, keine Fehlerkorrektur.' },
         { voice: 'b', text: 'Dazu der Prüfstein für Zuordnungsaufgaben: Adresse, Anfang und Ende, Fehlererkennung. Taucht eines davon auf, bist du über Schicht eins.' },
         { voice: 'a', text: 'Die Dateneinheit ist das Bit, im TCP/IP-Modell der Netzzugang, Verbindungstyp Punkt zu Punkt.' },
-        /* AUSSPRACHE-FIX 19.08.2026 (Rueckmeldung ruckG4zz nach Handy-Test):
-           Hier stand vorher eine nackte Aufzaehlung — "BAN, PAN, LAN und
-           WLAN, CAN, MAN, WAN, GAN." Ein Block aus acht dreibuchstabigen
-           Grossschreibungen hintereinander ist fuer eine deutsche Stimme
-           der Ausloeser, ins Buchstabieren zu kippen oder abgehackt zu
-           werden. In den Erklaerkapiteln klingt dasselbe Kuerzel sauber —
-           dort steht es NIE allein, sondern immer mit einem Halbsatz
-           dahinter ("das BAN, das Body Area Network").
+        /* ZURUECKGEROLLT 19.08.2026 — auf ausdrueckliche Ansage von
+           ruckG4zz nach dem Handy-Test.
 
-           Deshalb bewusst KEINE Lautschrift-Regel in speech.js: die
-           haette auch die Kapitel getroffen, die schon gut klingen. Der
-           Fix ist, der Zusammenfassung dieselbe Satzform zu geben, die
-           vorne nachweislich funktioniert. Fachlich identisch, nur nicht
-           mehr als Kuerzel-Salve. */
-        { voice: 'b', text: 'Weiter mit der Ausdehnung. Von klein nach groß: das BAN direkt am Körper, das PAN in Reichweite weniger Meter, das LAN im Büro oder zu Hause, und drahtlos das WLAN.' },
-        { voice: 'a', text: 'Darüber dann das CAN auf dem Firmengelände, das MAN in der Stadt, das WAN über Länder hinweg und das GAN weltweit. Der eigentliche Merkpunkt dahinter: die Kategorien stecken ineinander. Ein CAN ist eine Handvoll LANs, ein WAN verbindet MANs und CANs.' },
+           Versuch war: die Kuerzel mit deutschen Halbsaetzen unterlegen
+           ("das BAN direkt am Koerper, das PAN in Reichweite weniger
+           Meter ..."), weil eine nackte Aufzaehlung eine deutsche Stimme
+           ins Buchstabieren kippen laesst. Vermutung war plausibel,
+           Hoerbefund war eindeutig dagegen: "vorher waren die Aufzaehlung
+           BAN / PAN viel besser, jetzt klingen sie schlechter."
+
+           Deshalb steht hier wieder EXAKT der Stand von vorher. Nicht
+           erneut "verbessern" ohne Hoerbefund — die Vermutung war schon
+           einmal falsch.
+
+           OFFEN GEBLIEBEN (bewusst nicht in diesem Zug geraten): der
+           eigentliche Wunsch ist, dass die Zusammenfassung so klingt wie
+           die Stelle, an der die Kuerzel ZUM ERSTEN MAL erzaehlt werden
+           (Kapitel "ausdehnung") — dort steht hinter jedem Kuerzel der
+           volle englische Name. Das ist der naechste Kandidat, wird aber
+           erst gebaut, wenn ruckG4zz es so bestaetigt. */
+        { voice: 'b', text: 'Weiter mit der Ausdehnung. Von klein nach gross: BAN, PAN, LAN und WLAN, CAN, MAN, WAN, GAN.' },
+        { voice: 'a', text: 'Und der eigentliche Merkpunkt dahinter: die Kategorien stecken ineinander. Ein CAN ist eine Handvoll LANs, ein WAN verbindet MANs und CANs.' },
         { voice: 'b', text: 'Dann die Medien. Bei Kupfer die Kategorien: Cat fünf e ein Gigabit pro Sekunde über hundert Meter.' },
         { voice: 'a', text: 'Cat sechs schafft zehn Gigabit nur bis etwa siebenunddreissig bis fünfundfünfzig Meter, Cat sechs a die vollen zehn Gigabit über hundert Meter. Das ist die Falle.' },
         { voice: 'b', text: 'Bei Glasfaser: Multimode mit fünfzig zu hundertfünfundzwanzig Mikrometer bis etwa fünfhundertfünfzig Meter, Singlemode mit neun zu hundertfünfundzwanzig für Kilometer.' },
