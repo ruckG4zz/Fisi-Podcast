@@ -32,7 +32,80 @@ const PODCAST_L1 = {
   quelle: 'NEINT1_OSI_Enzyklopaedie_FINAL.html, Section sec-l1',
 
   chapters: [
-    /* ---------------------------------------------------------------- 01 */
+    /* ---------------------------------------------------------------- 01
+       EINLEITUNG — der Rahmen ueber allem.
+
+       NACHGETRAGEN 19.08.2026 auf Wunsch von ruckG4zz: der Podcast fiel
+       bis hierher mit der Tuer ins Haus ("Wir fangen heute ganz unten
+       an"), ohne je gesagt zu haben, WAS dieses Modell ueberhaupt ist und
+       warum bei Schicht eins angefangen wird. Die Enzyklopaedie macht das
+       auf ihrer ERSTEN Seite (Section id="start") — genau dort spannt sie
+       den roten Faden auf. Dieses Kapitel ist die Hoerfassung davon.
+
+       FAKTENQUELLE: NEINT1_OSI_Enzyklopaedie_FINAL.html, Section "start"
+       (OSI-Uebersicht, "Warum ueberhaupt Schichten?", IHK-Merksatz,
+       TCP/IP-Zuordnungstabelle, "Der rote Faden: Wir verfolgen ein
+       Paket", Kapselung/Entkapselung, "So liest du die Kapitel").
+       Nichts hinzuerfunden — auch die PDU-Kette und die Schichtnamen
+       stehen dort so.
+
+       BEWUSSTE AUSNAHME VON DER DOPPELNENNUNGS-REGEL:
+       Seit dem Skript-Durchgang vom 18.08.2026 gilt "keine deutsch/
+       englisch-Doppelnennungen" — es klang wie ein Vokabelheft. HIER
+       gilt das ausdruecklich NICHT: ruckG4zz will die englischen
+       Schichtnamen mindestens EINMAL gehoert haben, weil ihm genau die
+       in Pruefungen und Datenblaettern begegnen. Die Doppelnennung ist
+       deshalb auf dieses eine Kapitel begrenzt und Absicht, kein
+       Rueckfall. Bitte nicht "aufraeumen".
+
+       ZWEI PRONUNCIATION-LANDMINEN BEWUSST ENTSCHAERFT:
+       - Die Beispiel-URL "https://example.com" aus der Enzyklopaedie ist
+         hier zu "eine Webseite" geworden. Eine deutsche Stimme macht aus
+         "example.com" zuverlaessig Kauderwelsch, und die URL traegt
+         inhaltlich nichts — das Beispiel funktioniert ohne sie genauso.
+       - "OSI" wird von speech.js lautschriftlich behandelt, siehe dort.
+       ---------------------------------------------------------------- */
+    {
+      id: 'einleitung',
+      titel: 'Einleitung — das OSI-Modell',
+      kurz: 'Sieben Schichten, der rote Faden und warum wir unten anfangen',
+      segments: [
+        { voice: 'b', text: 'Bevor wir irgendwo tief einsteigen, klären wir kurz, wo wir hier überhaupt sind. Diese Reihe folgt dem OSI-Referenzmodell.' },
+        { voice: 'a', text: 'Ausgeschrieben: Open Systems Interconnection Reference Model. Sieben Schichten, und jede davon hat genau eine feste Aufgabe.' },
+        { voice: 'b', text: 'Warum überhaupt Schichten? Man könnte ja auch einfach sagen: Daten rein, Daten raus.' },
+        { voice: 'a', text: 'Könnte man. Nur löst so jede Schicht genau ein Teilproblem und reicht das Ergebnis nach oben oder unten weiter. Das ist der ganze Gedanke dahinter.' },
+        { voice: 'b', text: 'Und was habe ich praktisch davon?' },
+        { voice: 'a', text: 'Hersteller A baut Switches, Hersteller B Router, Hersteller C die Software. Solange sich alle an die Schnittstellen zwischen den Schichten halten, funktioniert das zusammen. Genau das ist der Kern von Interoperabilität.' },
+        { voice: 'b', text: 'Dann gehen wir die sieben einmal von unten nach oben durch. Und zwar mit den englischen Namen dazu, weil dir genau die in Prüfungen und Datenblättern begegnen.' },
+        { voice: 'a', text: 'Schicht eins ist die Bitübertragungsschicht, englisch Physical Layer. Schicht zwei die Sicherungsschicht, Data Link Layer. Schicht drei die Vermittlungsschicht, Network Layer.' },
+        { voice: 'b', text: 'Weiter.' },
+        { voice: 'a', text: 'Schicht vier ist die Transportschicht, Transport Layer. Schicht fünf die Sitzungsschicht, Session Layer. Schicht sechs die Darstellungsschicht, Presentation Layer. Und Schicht sieben die Anwendungsschicht, Application Layer.' },
+        { voice: 'b', text: 'Diese Namen kommen ab jetzt nicht mehr doppelt. Einmal solltest du sie aber gehört haben, in beiden Sprachen.' },
+        { voice: 'a', text: 'Und dann kommt der Punkt, der in der IHK-Prüfung wirklich zählt.' },
+        { voice: 'b', text: 'Nämlich?' },
+        { voice: 'a', text: 'Der Merksatz: das OSI-Modell ist ein Referenzmodell. Theoretisch, sieben Schichten. TCP/IP dagegen ist das Implementierungsmodell. Praktisch, vier Schichten. Und gefragt wird gerne die Zuordnung zwischen beiden.' },
+        { voice: 'b', text: 'Dann nehmen wir die gleich mit. Die TCP/IP-Schicht Anwendung deckt die OSI-Schichten sieben, sechs und fünf ab.' },
+        { voice: 'a', text: 'Transport entspricht Schicht vier. Internet entspricht Schicht drei. Und der Netzzugang deckt die Schichten zwei und eins gemeinsam ab.' },
+        { voice: 'b', text: 'Vier gegen sieben. Wer diese Zuordnung im Kopf hat, hat eine typische Prüfungsaufgabe schon halb erledigt.' },
+        { voice: 'a', text: 'Und jetzt zu dem, was sich durch alles Weitere zieht. Wir verfolgen ein Paket.' },
+        { voice: 'b', text: 'Ein einzelnes Paket, durch alle sieben Schichten?' },
+        { voice: 'a', text: 'Genau eins. Stell dir vor, du öffnest im Browser eine Webseite. Diese eine Anfrage wandert durch alle sieben Schichten, und genau diesen Weg gehen wir mit. Schicht für Schicht.' },
+        { voice: 'b', text: 'Was passiert dabei auf dem Weg nach unten?' },
+        { voice: 'a', text: 'Das nennt sich Kapselung, englisch Encapsulation. Beim Sender wandern die Daten von oben, also Schicht sieben, nach unten bis Schicht eins. Jede Schicht packt ihre eigenen Steuerinformationen außen um das Paket der Schicht darüber.' },
+        { voice: 'b', text: 'Und der Name der Dateneinheit ändert sich dabei mit.' },
+        { voice: 'a', text: 'In genau dieser Reihenfolge: Data, Segment, Paket, Frame, Bits. Diese fünf Namen musst du sicher zuordnen können, das ist eine beliebte IHK-Frage.' },
+        { voice: 'b', text: 'Und beim Empfänger läuft das Ganze rückwärts?' },
+        { voice: 'a', text: 'Spiegelbildlich. Entkapselung, englisch Decapsulation, von Schicht eins nach oben. Jede Schicht liest ihren Header, also den vorangestellten Block mit den Steuerinfos, entfernt ihn und reicht den Rest nach oben weiter.' },
+        { voice: 'b', text: 'Bis am Ende wieder die fertige Webseite dasteht.' },
+        { voice: 'a', text: 'Genau da kommt es raus. Dieselben sieben Schichten, nur zwei Richtungen.' },
+        { voice: 'b', text: 'Und das erklärt auch, warum wir ganz unten anfangen und nicht oben.' },
+        { voice: 'a', text: 'Richtig. Wir folgen der Aufwärtsreise des Empfängers. Deshalb beginnt diese Reihe bei Schicht eins mit rohen Bits und arbeitet sich nach oben bis Schicht sieben zu den fertigen Anwendungsdaten.' },
+        { voice: 'b', text: 'Und an jedem Schichtübergang steht eine Brücke: was hat die Schicht gerade ausgepackt, und was macht die nächste damit?' },
+        { voice: 'a', text: 'So ist der rote Faden gespannt. Dann fangen wir an. Ganz unten.' }
+      ]
+    },
+
+    /* ---------------------------------------------------------------- 02 */
     {
       id: 'intro',
       titel: 'Einstieg',
@@ -370,8 +443,22 @@ const PODCAST_L1 = {
         { voice: 'a', text: 'Und mindestens genauso wichtig, was sie nicht tut: keine Adressen, keine Frames, keine Fehlerkorrektur.' },
         { voice: 'b', text: 'Dazu der Prüfstein für Zuordnungsaufgaben: Adresse, Anfang und Ende, Fehlererkennung. Taucht eines davon auf, bist du über Schicht eins.' },
         { voice: 'a', text: 'Die Dateneinheit ist das Bit, im TCP/IP-Modell der Netzzugang, Verbindungstyp Punkt zu Punkt.' },
-        { voice: 'b', text: 'Weiter mit der Ausdehnung. Von klein nach gross: BAN, PAN, LAN und WLAN, CAN, MAN, WAN, GAN.' },
-        { voice: 'a', text: 'Und der eigentliche Merkpunkt dahinter: die Kategorien stecken ineinander. Ein CAN ist eine Handvoll LANs, ein WAN verbindet MANs und CANs.' },
+        /* AUSSPRACHE-FIX 19.08.2026 (Rueckmeldung ruckG4zz nach Handy-Test):
+           Hier stand vorher eine nackte Aufzaehlung — "BAN, PAN, LAN und
+           WLAN, CAN, MAN, WAN, GAN." Ein Block aus acht dreibuchstabigen
+           Grossschreibungen hintereinander ist fuer eine deutsche Stimme
+           der Ausloeser, ins Buchstabieren zu kippen oder abgehackt zu
+           werden. In den Erklaerkapiteln klingt dasselbe Kuerzel sauber —
+           dort steht es NIE allein, sondern immer mit einem Halbsatz
+           dahinter ("das BAN, das Body Area Network").
+
+           Deshalb bewusst KEINE Lautschrift-Regel in speech.js: die
+           haette auch die Kapitel getroffen, die schon gut klingen. Der
+           Fix ist, der Zusammenfassung dieselbe Satzform zu geben, die
+           vorne nachweislich funktioniert. Fachlich identisch, nur nicht
+           mehr als Kuerzel-Salve. */
+        { voice: 'b', text: 'Weiter mit der Ausdehnung. Von klein nach groß: das BAN direkt am Körper, das PAN in Reichweite weniger Meter, das LAN im Büro oder zu Hause, und drahtlos das WLAN.' },
+        { voice: 'a', text: 'Darüber dann das CAN auf dem Firmengelände, das MAN in der Stadt, das WAN über Länder hinweg und das GAN weltweit. Der eigentliche Merkpunkt dahinter: die Kategorien stecken ineinander. Ein CAN ist eine Handvoll LANs, ein WAN verbindet MANs und CANs.' },
         { voice: 'b', text: 'Dann die Medien. Bei Kupfer die Kategorien: Cat fünf e ein Gigabit pro Sekunde über hundert Meter.' },
         { voice: 'a', text: 'Cat sechs schafft zehn Gigabit nur bis etwa siebenunddreissig bis fünfundfünfzig Meter, Cat sechs a die vollen zehn Gigabit über hundert Meter. Das ist die Falle.' },
         { voice: 'b', text: 'Bei Glasfaser: Multimode mit fünfzig zu hundertfünfundzwanzig Mikrometer bis etwa fünfhundertfünfzig Meter, Singlemode mit neun zu hundertfünfundzwanzig für Kilometer.' },
@@ -834,6 +921,36 @@ const REGISTER_L1 = [
     id: 'fehlerquellen', label: 'Fehlerquellen Schicht 1', chapter: 'fehler',
     aliases: ['fehlerquellen', 'fehlerquelle', 'fehler', 'fehlersuche', 'störungssuche', 'kabelbruch', 'wackelkontakt', 'sfp', 's f p', 'transceiver'],
     antwort: 'Typische Fehlerquellen auf Schicht eins sind: Dämpfung über die Distanz. Kabelbruch oder Wackelkontakt, meist die häufigste reale Ursache und oft mechanisch. Elektromagnetische Störungen und Übersprechen. Das falsche Kabel für die Strecke, etwa Cat fünf e für zehn Gigabit oder über hundert Meter Länge. Verschmutzte oder beschädigte LWL-Stecker, wo schon kleinste Verunreinigungen die Signalqualität spürbar verschlechtern. Und defekte Transceiver beziehungsweise SFP-Module, wobei Modul und Kabeltyp zusammenpassen müssen.'
+  },
+
+  /* --- Einleitung / OSI-Rahmen ------------------------------------------
+     NEU 19.08.2026 mit dem Einleitungs-Kapitel. Ohne diese drei Eintraege
+     wuerde eine Frage nach "was ist OSI" oder "was heisst Kapselung"
+     direkt im ersten Kapitel im ehrlichen Fallback landen — der
+     schlechtestmoegliche erste Eindruck.
+
+     Hinweis zu 'kapselung': dieselben Aliase liegen auch in Layer 2
+     (Eintrag 'header'). Das ist ABSICHT und kein Konflikt — der Matcher
+     sucht immer nur im Register der laufenden Schicht. In Layer 1 kommt
+     die Modell-Uebersicht, in Layer 2 die Frame-Sicht mit Header und
+     Trailer. Zwei Blickwinkel auf dieselbe Sache, jeweils passend zum
+     Ort der Frage. Die Testsuite prueft Alias-Eindeutigkeit bewusst nur
+     INNERHALB einer Schicht.
+     ---------------------------------------------------------------------- */
+  {
+    id: 'osi', label: 'OSI-Referenzmodell', chapter: 'einleitung',
+    aliases: ['osi', 'o s i', 'osi modell', 'osi referenzmodell', 'referenzmodell', 'schichtenmodell', 'osi schichtenmodell', 'sieben schichten', 'open systems interconnection', 'interoperabilität', 'interoperabilitaet'],
+    antwort: 'OSI steht für Open Systems Interconnection Reference Model. Es beschreibt sieben Schichten, von denen jede genau eine feste Aufgabe löst und das Ergebnis nach oben oder unten weiterreicht. Der Vorteil: solange sich alle Hersteller an die Schnittstellen zwischen den Schichten halten, arbeiten ihre Geräte zusammen. Das ist der Kern von Interoperabilität. Von unten nach oben: Bitübertragung, Sicherung, Vermittlung, Transport, Sitzung, Darstellung, Anwendung.'
+  },
+  {
+    id: 'tcpip', label: 'TCP/IP-Modell und die Zuordnung zu OSI', chapter: 'einleitung',
+    aliases: ['tcp ip', 'tcpip', 'tcp ip modell', 'implementierungsmodell', 'vier schichten', 'netzzugang', 'zuordnung osi tcp ip'],
+    antwort: 'Der IHK-Merksatz dazu: das OSI-Modell ist ein Referenzmodell, also theoretisch mit sieben Schichten. TCP/IP ist das Implementierungsmodell, also praktisch mit vier Schichten. Die Zuordnung: die TCP/IP-Schicht Anwendung deckt die OSI-Schichten sieben, sechs und fünf ab. Transport entspricht Schicht vier, Internet entspricht Schicht drei, und der Netzzugang deckt die Schichten zwei und eins gemeinsam ab.'
+  },
+  {
+    id: 'kapselung', label: 'Kapselung und Entkapselung', chapter: 'einleitung',
+    aliases: ['kapselung', 'entkapselung', 'encapsulation', 'decapsulation', 'kapseln', 'entkapseln', 'roter faden', 'dateneinheiten', 'pdu kette'],
+    antwort: 'Kapselung, englisch Encapsulation, passiert beim Sender: die Daten wandern von Schicht sieben nach unten bis Schicht eins, und jede Schicht packt ihre eigenen Steuerinformationen außen um das Paket der Schicht darüber. Die Dateneinheit ändert dabei ihren Namen, in dieser Reihenfolge: Data, Segment, Paket, Frame, Bits. Beim Empfänger läuft es spiegelbildlich als Entkapselung, englisch Decapsulation, von Schicht eins nach oben: jede Schicht liest ihren Header, entfernt ihn und reicht den Rest nach oben weiter.'
   },
 
   /* --- Grundlagen -------------------------------------------------------- */

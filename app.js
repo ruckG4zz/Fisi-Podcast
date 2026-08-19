@@ -166,6 +166,44 @@ const App = (() => {
     } catch (_) { return null; }
   }
 
+  /* ---------------------------------------------------------------------
+     EINMALIGE VERSCHIEBUNG DES LAYER-1-HOERSTANDS (19.08.2026)
+     ---------------------------------------------------------------------
+     Layer 1 hat mit dem neuen Kapitel "einleitung" ganz vorne EIN Kapitel
+     mehr bekommen. Der Fortschritt wird als reiner Zahlen-Index abgelegt —
+     ein gespeichertes "Kapitel 5" zeigt seit der Ergaenzung also auf das
+     falsche Thema. Wer bei den Topologien aufgehoert hat, laege danach bei
+     den Uebertragungsmodi.
+
+     Deshalb wird der gespeicherte Index EINMAL um eins angehoben. Mit
+     Marke im Geraetespeicher, exakt nach dem Muster der Stimm-Migration
+     weiter unten: ohne Marke wuerde bei JEDEM App-Start weitergeschoben
+     und der Hoerstand wanderte langsam ans Ende der Schicht.
+
+     Betrifft nur Layer 1. Layer 2 und 3 sind unveraendert.
+     --------------------------------------------------------------------- */
+  const L1_SHIFT_MARKE = 'fisi-podcast-l1-einleitung-verschoben';
+
+  function migriereL1Fortschritt() {
+    try {
+      if (localStorage.getItem(L1_SHIFT_MARKE)) return;
+      const l1 = LAYERS.find(l => l.id === 'l1');
+      /* Marke auch dann setzen, wenn es nichts zu verschieben gibt —
+         sonst laeuft die Pruefung bei jedem Start erneut ins Leere. */
+      if (l1) {
+        const raw = localStorage.getItem(l1.key);
+        if (raw) {
+          const d = JSON.parse(raw);
+          if (typeof d.chapter === 'number' && d.chapter < l1.podcast.chapters.length - 1) {
+            d.chapter += 1;
+            localStorage.setItem(l1.key, JSON.stringify(d));
+          }
+        }
+      }
+      localStorage.setItem(L1_SHIFT_MARKE, '1');
+    } catch (_) { /* privater Modus o.ä. — kein Grund abzustürzen */ }
+  }
+
   function resetProgress() {
     try { localStorage.removeItem(schicht().key); } catch (_) {}
     state.chapter = 0; state.segment = 0;
@@ -1567,6 +1605,11 @@ const App = (() => {
         'Es wurde keine der Dateien content-l1.js, content-l2.js oder content-l3.js gefunden.';
       return;
     }
+
+    /* Hoerstand an das neue Einleitungs-Kapitel anpassen — muss VOR dem
+       ersten load() laufen, sonst wird der alte Index noch einmal
+       angezeigt und beim naechsten save() falsch zurueckgeschrieben. */
+    migriereL1Fortschritt();
 
     /* Zuletzt gehoerte Schicht wiederherstellen */
     try {

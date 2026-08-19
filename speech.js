@@ -75,7 +75,35 @@ const Speech = (() => {
     [/\bCSMA\/CA\b/g,   'C-S-M-A C-A'],
     [/\bMAC\b/g,        'Mac'],
     [/\bTCP\/IP\b/g,    'T-C-P I-P'],
-    [/\bOSI\b/g,        'O-S-I'],
+
+    /* ---------------------------------------------------------------
+       OSI — von ruckG4zz am 19.08.2026 als "klingt wild" gemeldet.
+
+       Vorher stand hier 'O-S-I'. Die uebrigen Buchstabier-Regeln in
+       dieser Tabelle (L-W-L, C-S-M-A) funktionieren nachweislich —
+       ausgerechnet OSI nicht. Wahrscheinlichste Ursache: das einzelne
+       "I" am Ende. "L" und "W" sind als Buchstabenname eindeutig, ein
+       alleinstehendes "I" kann die Stimme als kurzes /ɪ/ oder englisch
+       "eye" lesen. Danach klingt die Abkuerzung jedes Mal anders — und
+       genau das beschreibt "wild" ziemlich gut.
+
+       Jetzt stehen die deutschen Buchstabennamen ausgeschrieben da,
+       statt sich auf die Buchstaben-Interpretation der Stimme zu
+       verlassen: Oh-Ess-Ih.
+
+       EHRLICH DAZU: das ist die beste begruendete Annahme, kein
+       Hoerbefund — geprueft werden kann es erst am Handy. Sollte es
+       weiter schief klingen, sind das die naechsten zwei Kandidaten,
+       damit sie nicht neu hergeleitet werden muessen:
+         1. 'Oh Ess Ih'  (Leerzeichen statt Bindestrich, mehr Trennung)
+         2. Regel ganz raus — moderne Chirp3-Stimmen kennen "OSI"
+            womoeglich selbst; dann bleibt aber das Risiko "Ossi".
+
+       Die Bindestrich-Variante MUSS zuerst stehen: sonst bleibt in
+       "OSI-Modell" nach der Wortregel ein "Oh-Ess-Ih-Modell" mit
+       doppeltem Bindestrich stehen. --------------------------------- */
+    [/\bOSI-/g,         'Oh-Ess-Ih '],
+    [/\bOSI\b/g,        'Oh-Ess-Ih'],
 
     /* ---------------------------------------------------------------
        LAYER 2 (Sicherungsschicht) — Abkuerzungen, die eine deutsche
