@@ -682,6 +682,16 @@ const App = (() => {
     state.playing = false;
     state.paused  = true;
     Speech.pause();
+    /* Der Stillton laeuft in der Pause BEWUSST weiter (ergaenzt 22.08.2026).
+       Er war hier vorher nur zufaellig nicht abgeschaltet — jetzt steht es
+       ausdruecklich da, damit es niemand "aufraeumt".
+
+       Grund: solange irgendein Ton laeuft, laesst Chrome die Seite im
+       Hintergrund rechnen und behaelt den Audio-Fokus. Genau davon haengt
+       ab, ob die Abspieltaste auf dem Sperrbildschirm spaeter noch etwas
+       ausrichten kann. Waere er hier aus, waere die Seite beim naechsten
+       Tastendruck moeglicherweise laengst eingefroren. */
+    silentKeepAlive(true);
     setPlayUI(false);
     tickerStop();
     renderZeit();          // Standlinie einmal sauber nachziehen
@@ -1155,11 +1165,13 @@ const App = (() => {
     try {
       const ansage = pick(MOD.mikroAnsage);
       log(ansage, 'recap');
-      await Speech.speak(ansage, { voice: 'b' });
-    } catch (_) {
-      /* Die Ansage ist Hoeflichkeit, kein Muss. Scheitert sie, wird
-         trotzdem zugehoert — sonst waere die Frage verloren. */
-    }
+      /* Das Ergebnis wird hier bewusst NICHT ausgewertet: die Ansage ist
+         Hoeflichkeit, kein Muss. Bleibt sie stumm, wird trotzdem zugehoert —
+         sonst waere die Frage verloren. Anders als vorher steht ein Fehler
+         dank sprich() aber wenigstens im Verlauf, statt spurlos zu
+         verschwinden. */
+      await sprich(ansage, { voice: 'b' }, 'Die Ansage');
+    } catch (_) { /* siehe oben */ }
 
     el.mic.textContent = '🎤  Ich höre …';
     micStatus('Starte …');
@@ -1191,12 +1203,35 @@ const App = (() => {
       await handleQuestion(text, wasPlaying);
 
     } catch (e) {
-      el.mic.classList.remove('listening');
-      el.mic.textContent = '🎤  Frage stellen';
       micStatus(e.message || 'Spracherkennung fehlgeschlagen.', 'fail');
       log(e.message || 'Spracherkennung fehlgeschlagen.', 'err');
       state.busy = false;
       if (wasPlaying) resumeAfterQuestion();
+    } finally {
+      /* ===== LETZTES NETZ FUER state.busy (neu 22.08.2026) =====
+
+         state.busy sperrt startPlay() UND medienPlay(). Bleibt die Marke
+         haengen, ist die App vollstaendig bedienungsunfaehig: die
+         Abspieltaste tut nichts, der Sperrbildschirm tut nichts, und es
+         gibt keinen Hinweis warum. Genau so fuehlt sich "da ist noch der
+         Wurm drin" an.
+
+         Gesetzt wird sie ganz oben in dieser Funktion, geloest normalerweise
+         im finally von handleQuestion. Dazwischen liegen mehrere await —
+         jedes davon konnte die Marke bisher unbemerkt stehen lassen, wenn
+         eine Zusage nie aufgeloest wurde. Die Stillstands-Wache in
+         speech.js verhindert das inzwischen an der Wurzel; diese Zeilen
+         sind der Guertel zum Hosentraeger.
+
+         Der Knopf wird hier ebenfalls zentral zurueckgesetzt, statt in
+         drei Zweigen einzeln — er blieb sonst auf "Ich hoere …" stehen,
+         wenn ein unerwarteter Weg aus der Funktion herausfuehrte. */
+      el.mic.classList.remove('listening');
+      el.mic.textContent = '🎤  Frage stellen';
+      if (state.busy) {
+        state.busy = false;
+        log('Der Frage-Ablauf wurde unerwartet verlassen — die Bedienung ist wieder frei.', 'sys');
+      }
     }
   }
 
@@ -1207,6 +1242,77 @@ const App = (() => {
     state.busy = true;
     stopPlay();
     await handleQuestion(text, wasPlaying);
+  }
+
+  /* =====================================================================
+     GESPROCHEN — ODER NUR GEDACHT?  (neu 22.08.2026)
+     ---------------------------------------------------------------------
+     BEFUND ruckG4zz: "wenn ich eine Frage stelle, geht es manchmal einfach
+     im Thema weiter — es wird gestoppt, die Frage gehoert, manchmal kommt
+     noch 'Gute Frage, und zwar…', aber dann laeuft es einfach weiter."
+
+     Die Ursache steht nicht in der Frage-Erkennung, sondern eine Ebene
+     tiefer: Speech.speak() liefert seit dem Cloud-Umbau ein Ergebnis
+     zurueck ({stopped, error, cloudFehler}). playLoop() wertet das sauber
+     aus und haelt bei einem Fehler laut an. Im gesamten Frage-Ablauf wurde
+     es dagegen an KEINER Stelle angesehen — jedes await Speech.speak(...)
+     stand dort nackt da.
+
+     Damit war jeder Wiedergabefehler waehrend einer Antwort unsichtbar.
+     Die Antwort kam nicht, der Code lief unbeirrt in den Recap
+     ("Zurueck zum Thema: …") und startete den Podcast neu. Kein Ton, kein
+     Eintrag im Verlauf, kein Hinweis — nach aussen exakt das beschriebene
+     Bild.
+
+     Ab jetzt wird jede Ausgabe im Frage-Ablauf geprueft. Unterschieden
+     wird bewusst zwischen drei Faellen, weil sie unterschiedlich behandelt
+     gehoeren:
+
+       - sauber gesprochen        -> weiter wie bisher
+       - absichtlich abgebrochen  -> still hinnehmen (jemand hat gestoppt)
+       - Fehler                   -> benennen, sichtbar machen, EINMAL
+                                     wiederholen wenn er voruebergehend ist
+     ===================================================================== */
+
+  /* Fehler, die sich mit einem zweiten Anlauf oft von selbst erledigen:
+     eine kurz entzogene Tonausgabe (Mikrofon, Anruf, Benachrichtigung).
+     Dauerhafte Fehler (fehlender Schluessel, abgelehnter Cloud-Aufruf)
+     stehen bewusst NICHT hier — die zweimal zu versuchen kostet nur Zeit
+     und im Zweifel Kontingent. */
+  const VORUEBERGEHEND = ['wiedergabe-blockiert', 'extern-pausiert', 'audio-wiedergabe-fehler'];
+
+  function istVoruebergehend(res) {
+    const e = String((res && res.error) || '');
+    return VORUEBERGEHEND.some(k => e.startsWith(k));
+  }
+
+  /**
+   * Spricht und meldet ehrlich zurueck, ob es tatsaechlich hoerbar war.
+   * @returns {Promise<boolean>} true = gesprochen, false = nicht gesprochen
+   */
+  async function sprich(text, opts, was) {
+    let res = await Speech.speak(text, opts);
+
+    if (res && res.error && istVoruebergehend(res)) {
+      log(was + ' wurde unterbrochen (' + res.error + '). Zweiter Anlauf.', 'sys');
+      res = await Speech.speak(text, opts);
+    }
+
+    if (!res || (!res.stopped && !res.error)) return true;
+
+    if (res.error) {
+      const grund = res.cloudFehler || res.error;
+      log(was + ' konnte nicht gesprochen werden: ' + grund, 'err');
+      /* Dauerhafte Cloud-Probleme unuebersehbar machen — sonst steht die
+         App wieder stumm da, ohne dass jemand den Grund sieht. */
+      if (res.error === 'kein-schluessel' || res.error === 'cloud-fehler') {
+        zeigeSprachFehler(grund);
+      }
+      return false;
+    }
+
+    // stopped ohne error = bewusst abgebrochen, das ist kein Fehlerfall
+    return false;
   }
 
   /* Ergebnis-Behandlung einer Frage.
@@ -1278,9 +1384,17 @@ const App = (() => {
         }
         log('Antwort (' + r.entry.label + '): ' + antwort, 'answer');
         showSource(r.entry);
-        await Speech.speak(antwort, { voice: 'a' });
+        const gesprochen = await sprich(antwort, { voice: 'a' }, 'Die Antwort');
         el.qtext.value = '';
-        fortsetzen = wasPlaying;
+        /* Kam die Antwort nachweislich nicht heraus, wird NICHT stillschweigend
+           ins Thema zurueckgesprungen — genau das war der gemeldete Fehler.
+           Der Treffer bleibt in der Oberflaeche stehen und im Verlauf steht,
+           was schiefging. Fortgesetzt wird erst auf Tastendruck. */
+        fortsetzen = gesprochen && wasPlaying;
+        if (!gesprochen) {
+          log('Die Wiedergabe bleibt stehen, damit die Antwort nicht verloren geht. ' +
+              'Mit „Abspielen" geht es weiter — die Antwort steht oben im Text.', 'sys');
+        }
         return;
       }
 
@@ -1292,7 +1406,7 @@ const App = (() => {
         const beispiel = P().chapters[Math.min(2, P().chapters.length - 1)].titel;
         const t = `Du willst springen, aber ich habe nicht verstanden wohin. Sag zum Beispiel: spring zu ${beispiel}.`;
         log(t, 'err');
-        await Speech.speak(t, { voice: 'b' });
+        await sprich(t, { voice: 'b' }, 'Die Rückfrage');
         fortsetzen = wasPlaying;
         return;
       }
@@ -1310,13 +1424,15 @@ const App = (() => {
         });
         log(verweis, 'answer');
         showOtherLayer(woanders);
-        await Speech.speak(verweis, { voice: 'a' });
+        const wegweiserOk = await sprich(verweis, { voice: 'a' }, 'Der Wegweiser');
 
-        const nach = pick(MOD.andereSchichtAbschluss);
-        log(nach, 'recap');
-        await Speech.speak(nach, { voice: 'b' });
+        if (wegweiserOk) {
+          const nach = pick(MOD.andereSchichtAbschluss);
+          log(nach, 'recap');
+          await sprich(nach, { voice: 'b' }, 'Der Abschlusssatz');
+        }
         el.qtext.value = '';
-        fortsetzen = wasPlaying;
+        fortsetzen = wegweiserOk && wasPlaying;
         return;
       }
 
@@ -1325,19 +1441,28 @@ const App = (() => {
       const absage = fuellen(pick(MOD.keinTreffer), { schicht: schicht().gesprochen });
       log(absage, 'err');
       showNoMatch();
-      await Speech.speak(absage, { voice: 'a' });
+      const absageOk = await sprich(absage, { voice: 'a' }, 'Die Absage');
 
-      const abschluss = pick(MOD.keinTrefferAbschluss);
-      log(abschluss, 'recap');
-      await Speech.speak(abschluss, { voice: 'b' });
-      fortsetzen = wasPlaying;
+      if (absageOk) {
+        const abschluss = pick(MOD.keinTrefferAbschluss);
+        log(abschluss, 'recap');
+        await sprich(abschluss, { voice: 'b' }, 'Der Abschlusssatz');
+      }
+      fortsetzen = absageOk && wasPlaying;
 
     } catch (e) {
       log('Fehler beim Beantworten: ' + (e && e.message), 'err');
       fortsetzen = wasPlaying;
     } finally {
       state.busy = false;
-      if (fortsetzen) resumeAfterQuestion();
+      if (fortsetzen) {
+        resumeAfterQuestion();
+      } else if (!wasPlaying) {
+        /* Kaltstart-Fall: es wurde gefragt, ohne dass vorher abgespielt
+           wurde. Dann gibt es auch nichts fortzusetzen — das ist richtig
+           so, sah bisher aber aus wie ein haengengebliebener Ablauf. */
+        log('Der Podcast lief nicht — mit „Abspielen" geht es los.', 'sys');
+      }
     }
   }
 
@@ -1345,8 +1470,36 @@ const App = (() => {
      weiterlaufen. Frueher konnte ein haengender Recap den Player komplett
      stilllegen. */
   async function resumeAfterQuestion() {
+    /* ===== ZUSTAND HART ZURUECKSETZEN (neu 22.08.2026) =====
+
+       startPlay() hat drei Auswege, und die Reihenfolge ist unerbittlich:
+
+         if (state.busy)   -> gar nichts
+         if (state.playing)-> gar nichts
+         if (state.paused) -> resumePlay()   <-- die Falle
+         sonst             -> playLoop()
+
+       Nach einer Zwischenfrage MUSS playLoop() drankommen: die alte
+       Abspielschleife wurde beim Stellen der Frage abgeraeumt, es laeuft
+       keine mehr. Steht state.paused hier aber noch auf true, greift
+       stattdessen resumePlay() — und das setzt die zuletzt geladene
+       Audiodatei fort. Das ist zu diesem Zeitpunkt der Recap, nicht der
+       Podcast. Ergebnis: der Recap laeuft nochmal, eine Abspielschleife
+       startet nie, der Podcast ist tot.
+
+       Gesetzt werden konnte die Marke waehrend der Frage von aussen —
+       durch eine Pausen-Meldung der Mediensitzung beim Oeffnen des
+       Mikrofons. Der Handler ist inzwischen gesperrt (siehe
+       initMediaSession), aber verlassen wird sich darauf nicht: hier wird
+       der Zustand vor dem Wiederanlauf in jedem Fall sauber gemacht. */
+    state.paused  = false;
+    state.playing = false;
+
     try { await speakRecap('frage'); }
     catch (e) { log('Recap übersprungen: ' + (e && e.message), 'sys'); }
+
+    state.paused  = false;
+    state.playing = false;
     startPlay();
   }
 
@@ -1630,14 +1783,73 @@ const App = (() => {
      (das die Luecke ueberhaupt erst klein macht) ist das der Doppelgriff
      gegen den Abbruch. Er laeuft jetzt IMMER, unabhaengig von der Stimme.
      --------------------------------------------------------------------- */
+  /* ---------------------------------------------------------------------
+     BEHOBEN 22.08.2026 — der Stillton war die ganze Zeit LEER.
+     ---------------------------------------------------------------------
+     Hier stand eine eingebaute Base64-WAV-Datei. Ausgepackt sieht sie so
+     aus:
+
+       "RIFF" | Groesse 36 | "WAVE" | "fmt " | 16 | PCM | 1 Kanal |
+       44100 Hz | 16 Bit | "data" | Groesse 0
+
+     Der letzte Wert ist der entscheidende: der Datenbereich ist NULL Bytes
+     gross. Die Datei enthaelt kein einziges Sample, ihre Laenge ist null
+     Sekunden. Ein solches Element haelt keinen Audio-Fokus — es gibt ja
+     nichts abzuspielen. Auch mit loop=true bleibt null mal unendlich null.
+
+     Damit hat der Baustein, der laut seiner eigenen Beschreibung "die
+     zweite Haelfte des Hintergrundwiedergabe-Fixes" ist, seit dem Einbau
+     schlicht nichts getan. Das erklaert beide hartnaeckigen Befunde auf
+     einmal: die Wiedergabe bricht bei dunklem Bildschirm nach dem
+     laufenden Satz ab (in der Luecke zwischen zwei Segmenten gibt Android
+     den Fokus frei), und die Abspieltaste auf dem Sperrbildschirm bleibt
+     tot (ohne Fokus friert Chrome die Seite ein, und ein play() aus dem
+     Hintergrund trifft dann eine Seite, die gar nicht mehr rechnet).
+
+     Jetzt wird eine echte, eine Sekunde lange Stille erzeugt: 8000 Samples
+     mit dem Wert null. Digital absolut lautlos — aber es ist tatsaechlich
+     Ton vorhanden, und darauf allein schaut das Betriebssystem.
+
+     EHRLICH: dass die Datei leer war, ist bewiesen (nachgerechnet, s.o.).
+     Dass ihre Reparatur die Hintergrundwiedergabe rettet, ist die
+     begruendete Erwartung — bestaetigen kann das nur ein Handy-Test.
+     --------------------------------------------------------------------- */
+  function stilleWavUrl(sekunden = 1, rate = 8000) {
+    const anzahl = Math.floor(sekunden * rate);
+    const daten  = anzahl * 2;                       // 16 Bit, ein Kanal
+    const puffer = new ArrayBuffer(44 + daten);
+    const v      = new DataView(puffer);
+    const text   = (pos, s) => { for (let i = 0; i < s.length; i++) v.setUint8(pos + i, s.charCodeAt(i)); };
+
+    text(0, 'RIFF');   v.setUint32(4, 36 + daten, true);
+    text(8, 'WAVE');   text(12, 'fmt ');
+    v.setUint32(16, 16, true);        // Laenge des fmt-Blocks
+    v.setUint16(20, 1, true);         // PCM
+    v.setUint16(22, 1, true);         // Kanaele
+    v.setUint32(24, rate, true);      // Abtastrate
+    v.setUint32(28, rate * 2, true);  // Bytes pro Sekunde
+    v.setUint16(32, 2, true);         // Blockgroesse
+    v.setUint16(34, 16, true);        // Bit pro Sample
+    text(36, 'data');  v.setUint32(40, daten, true);
+    /* Der Datenbereich bleibt auf null — das IST die Stille. Anders als
+       vorher ist er aber vorhanden und hat eine echte Laenge. */
+
+    return URL.createObjectURL(new Blob([puffer], { type: 'audio/wav' }));
+  }
+
   function silentKeepAlive(on) {
     try {
       if (!silentAudio) {
-        silentAudio = new Audio(
-          'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
-        );
+        silentAudio = new Audio(stilleWavUrl());
         silentAudio.loop = true;
-        silentAudio.volume = 0.001;
+        /* Volle Lautstaerke ist hier gefahrlos: die Samples sind
+           ausnahmslos null, es kann gar kein Ton entstehen. Die frueheren
+           0.001 waren ein Rest aus der Zeit, als hier noch echte Tondaten
+           vermutet wurden — und ein Stream nahe null wird von manchen
+           Android-Fassungen beim Fokus schlicht uebergangen. */
+        silentAudio.volume = 1;
+        silentAudio.playsInline = true;
+        silentAudio.setAttribute('playsinline', '');
       }
       if (on) { silentAudio.play().catch(() => {}); }
       else    { silentAudio.pause(); }
@@ -1664,9 +1876,31 @@ const App = (() => {
       /* Sperrbildschirm: Pause muss hier ebenfalls eine ECHTE Pause sein,
          sonst springt der Abschnitt beim Fortsetzen an den Anfang zurueck. */
       h('play',          () => medienPlay());
-      h('pause',         () => pausePlay());
-      h('nexttrack',     () => nextChapter());
-      h('previoustrack', () => prevChapter());
+
+      /* ===== SPERRE WAEHREND EINER ZWISCHENFRAGE (neu 22.08.2026) =====
+
+         medienPlay() hat diese Sperre seit jeher, pausePlay() nicht — und
+         das war eine echte Luecke, nicht bloss eine Ungleichheit.
+
+         Android meldet eine Pause an die Mediensitzung nicht nur, wenn man
+         den Knopf drueckt, sondern auch bei einem Wechsel des Audio-Fokus.
+         Beim Oeffnen des Mikrofons passiert genau das. Der Handler lief
+         dann mitten im Frage-Ablauf und setzte state.paused auf true.
+
+         Die Folge zeigte sich erst viel spaeter und sah nach einem ganz
+         anderen Fehler aus: nach der Antwort geht startPlay() wegen dieser
+         Marke in resumePlay() statt in playLoop(). Fortgesetzt wird dann
+         die zuletzt geladene Datei — also der Recap, nicht der Podcast.
+         Die Abspielschleife startet dabei nie wieder. Von aussen wirkt das
+         wie "die Frage wurde verschluckt und es laeuft irgendwie weiter".
+
+         Waehrend state.busy gesetzt ist, gehoert die Wiedergabe dem
+         Frage-Ablauf. Fremde Pausen-Meldungen werden deshalb ignoriert;
+         um wirklich stillstehende Tonausgabe kuemmert sich die
+         Stillstands-Wache in speech.js. */
+      h('pause',         () => { if (state.busy) return; pausePlay(); });
+      h('nexttrack',     () => { if (state.busy) return; nextChapter(); });
+      h('previoustrack', () => { if (state.busy) return; prevChapter(); });
     } catch (_) {}
     updateMediaMeta();
   }

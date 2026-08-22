@@ -289,17 +289,60 @@ const Speech = (() => {
      waere tot, ohne dass man den Grund sieht. */
   let laufendeWiedergabe = null;
 
+  /* Merkt, ob WIR das Audio absichtlich angehalten haben (echte Pause).
+     Ohne diese Unterscheidung koennte die Stillstands-Wache unten eine
+     ganz normale Pause faelschlich als Stoerung werten und die Wiedergabe
+     abraeumen. */
+  let absichtlichPausiert = false;
+
+  /* ---------------------------------------------------------------------
+     STILLSTANDS-WACHE (neu 22.08.2026)
+     ---------------------------------------------------------------------
+     Ein <audio>-Element, das von AUSSEN pausiert wird, feuert weder 'ended'
+     noch 'error'. Genau das passiert auf Android, wenn sich etwas anderes
+     den Audio-Fokus nimmt — allen voran die Spracherkennung selbst, die
+     beim Oeffnen des Mikrofons kurz den Ton kapert.
+
+     Die Folge war bisher toedlich und von aussen voellig unsichtbar: die
+     Zusage aus spieleUrl() wurde NIE aufgeloest. Der Aufrufer haengt dann
+     fuer immer im await — bei einer Zwischenfrage also mitten in
+     handleQuestion(), mit state.busy dauerhaft auf true. Danach ist auch
+     die Abspieltaste tot, weil startPlay() an genau dieser Marke abprallt.
+
+     Der Kommentar bei laufendeWiedergabe beschreibt diese Gefahr bereits —
+     aufgeloest wurde sie aber nur, wenn jemand aktiv stop() ruft. Bei einer
+     Stoerung von aussen ruft das niemand. Diese Wache schliesst die Luecke.
+     --------------------------------------------------------------------- */
+  const STILLSTAND_GRENZE = 4;   // Sekunden unerwarteten Stillstands
+
   function spieleUrl(url, myGen) {
     return new Promise(resolve => {
       const a = holePlayer();
       let done = false;
+      let wache = null;
+      let stillSeit = 0;
 
       const aufraeumen = () => {
         a.removeEventListener('ended', beiEnde);
         a.removeEventListener('error', beiFehler);
+        if (wache) { clearInterval(wache); wache = null; }
         if (laufendeWiedergabe && laufendeWiedergabe.id === myGen) laufendeWiedergabe = null;
       };
       const fertig = (p) => { if (done) return; done = true; aufraeumen(); resolve(p); };
+
+      /* Eine noch offene aeltere Wiedergabe ZUERST aufloesen.
+         Bisher wurde laufendeWiedergabe hier einfach ueberschrieben. Starten
+         zwei Sprechvorgaenge kurz hintereinander (beide mit demselben
+         speakGen, weil dazwischen kein stop() lag), dann kappt das Setzen von
+         a.src die erste Wiedergabe — sie feuert danach kein 'ended' mehr und
+         war zugleich nicht mehr abbrechbar. Ein zweiter stiller Dauerhaenger,
+         aus derselben Familie wie der oben beschriebene. */
+      if (laufendeWiedergabe) {
+        const alt = laufendeWiedergabe;
+        laufendeWiedergabe = null;
+        try { alt.abbrechen(); } catch (_) {}
+      }
+
       laufendeWiedergabe = { id: myGen, abbrechen: () => fertig({ stopped: true }) };
       const beiEnde   = () => fertig({ stopped: myGen !== speakGen });
       const beiFehler = () => fertig({ stopped: true, error: 'audio-wiedergabe-fehler' });
@@ -307,11 +350,29 @@ const Speech = (() => {
       a.addEventListener('ended', beiEnde);
       a.addEventListener('error', beiFehler);
 
+      absichtlichPausiert = false;
       a.src = url;
       a.play().catch(e => {
         // Haeufigster Fall: Wiedergabe ohne vorherige Nutzergeste blockiert
         fertig({ stopped: true, error: 'wiedergabe-blockiert: ' + (e && e.message) });
       });
+
+      /* Nur im Vordergrund verlaesslich — im Hintergrund drosselt Chrome
+         setInterval stark. Das ist in Ordnung: der Fall, den diese Wache
+         auffangen soll (Mikrofon nimmt den Ton), tritt ausschliesslich bei
+         aktivem Bildschirm auf. */
+      wache = setInterval(() => {
+        if (done) return;
+        if (absichtlichPausiert) { stillSeit = 0; return; }
+        if (a.paused) {
+          stillSeit++;
+          if (stillSeit >= STILLSTAND_GRENZE) {
+            fertig({ stopped: true, error: 'extern-pausiert' });
+          }
+        } else {
+          stillSeit = 0;
+        }
+      }, 1000);
     });
   }
 
@@ -420,6 +481,9 @@ const Speech = (() => {
   }
 
   function pause() {
+    /* Marke VOR dem Anhalten setzen, sonst koennte die Stillstands-Wache
+       im Zwischenraum einmal zuschlagen. */
+    absichtlichPausiert = true;
     if (player && !player.paused) { try { player.pause(); } catch (_) {} }
   }
 
@@ -445,6 +509,7 @@ const Speech = (() => {
   let letzterWiedergabeFehler = null;
 
   async function resume() {
+    absichtlichPausiert = false;
     if (!player || !player.src) return false;
     if (!player.paused) return true;          // laeuft ohnehin schon
     try {
@@ -566,11 +631,13 @@ const Speech = (() => {
 
       let finalText = '';
       let settled   = false;
-      let sicherung = null;
+      let uhren     = [];   // alle laufenden Zeitgeber, damit keiner liegen bleibt
+
+      const uhrWeg = () => { uhren.forEach(t => clearTimeout(t)); uhren = []; };
 
       const done = (fn, arg) => {
         if (settled) return; settled = true;
-        if (sicherung) { clearTimeout(sicherung); sicherung = null; }
+        uhrWeg();
         try { r.stop(); } catch (_) {}
         recognition = null;
         fn(arg);
@@ -609,36 +676,82 @@ const Speech = (() => {
 
       recognition = r;
 
-      /* Erst Berechtigung sicherstellen, DANN starten (siehe requestMic). */
-      status('Frage Mikrofon-Berechtigung an …');
-      requestMic()
+      /* =================================================================
+         HARTES SICHERHEITSNETZ — startet jetzt ERST MIT DER ERKENNUNG.
+         -----------------------------------------------------------------
+         BEHOBEN 22.08.2026 (Befund ruckG4zz: "geht nicht, wenn vorher nicht
+         auf Play gedrueckt wurde, also nach einem Kaltstart").
+
+         Der Zeitgeber lief bisher ab dem AUFRUF von listen() — die
+         Berechtigungsabfrage und das Oeffnen des Mikrofons durch
+         getUserMedia lagen also mit in denselben zwoelf Sekunden. Im
+         warmen Zustand faellt das nicht auf, weil beides in Millisekunden
+         durch ist.
+
+         Beim Kaltstart ist es genau umgekehrt: Android muss das
+         Aufnahmegeraet erst hochfahren, gegebenenfalls noch einen
+         Berechtigungsdialog zeigen, und die Spracherkennung selbst braucht
+         nach r.start() nochmal einen Moment. Davon war das Zeitfenster
+         bereits zur Haelfte aufgebraucht, bevor ueberhaupt zugehoert
+         wurde — das Zeitlimit schlug dann mitten in der Frage zu und
+         loeste mit leerem Text auf ("Es kam kein verwertbarer Text an").
+
+         Jetzt zaehlt die Uhr ab dem Moment, in dem tatsaechlich zugehoert
+         wird. Das Beschaffen der Berechtigung hat sein eigenes, deutlich
+         grosszuegigeres Netz (ein Dialog kann beliebig lange offen
+         stehen, ohne dass das ein Fehler waere).
+         ================================================================= */
+      const grenze = opts.timeout || 12000;
+
+      function sicherungStarten() {
+        if (settled) return;
+        uhren.push(setTimeout(() => {
+          if (settled) return;
+          try { r.stop(); } catch (_) {}
+          // Kurze Gnadenfrist fuer ein noch eintreffendes onend …
+          uhren.push(setTimeout(() => {
+            if (settled) return;
+            status('Zeitlimit erreicht.');
+            done(resolve, finalText.trim());   // ggf. leer -> Aufrufer behandelt das
+          }, 900));
+        }, grenze));
+      }
+
+      /* Aeusserstes Netz: falls die Berechtigungsanfrage selbst nie
+         zurueckkommt (Dialog weggewischt, Geraet blockiert), darf die
+         Zusage trotzdem nicht ewig offen bleiben. */
+      uhren.push(setTimeout(() => {
+        if (settled) return;
+        done(reject, new Error('Das Mikrofon hat sich nicht gemeldet. Bitte nochmal antippen.'));
+      }, (opts.startTimeout || 45000)));
+
+      /* ---------------------------------------------------------------
+         BERECHTIGUNG: getUserMedia nur noch, wenn wirklich noetig.
+
+         requestMic() oeffnet das Aufnahmegeraet und gibt es sofort wieder
+         frei. Ist der Zugriff laengst erteilt, bringt das nichts — im
+         Gegenteil: das Oeffnen und Schliessen unmittelbar vor r.start()
+         faellt mit dem Moment zusammen, in dem sich die Erkennung
+         dasselbe Geraet greifen will. Genau in dieses Bild passt die
+         Meldung "reagiert teilweise gar nicht auf eine Frage".
+
+         Deshalb wird zuerst der gespeicherte Stand abgefragt (loest keine
+         Abfrage aus) und nur bei 'prompt'/'denied'/'unbekannt' der
+         regulaere Weg gegangen.
+         --------------------------------------------------------------- */
+      status('Prüfe Mikrofon-Berechtigung …');
+      micPermission()
+        .then(st => (st === 'granted') ? true : requestMic())
         .then(() => {
           status('Berechtigung da, starte Erkennung …');
           try { r.start(); }
           catch (e) {
             // "already started" ist harmlos, alles andere zaehlt.
-            if (!/already started/i.test(e.message || '')) done(reject, e);
+            if (!/already started/i.test(e.message || '')) { done(reject, e); return; }
           }
+          sicherungStarten();
         })
         .catch(e => done(reject, e));
-
-      /* HARTES Sicherheitsnetz.
-         Vorher wurde hier nur r.stop() aufgerufen und darauf vertraut,
-         dass onend feuert. Tut es das nicht (auf Android beobachtbar,
-         wenn die Erkennung gar nicht erst richtig startet), blieb die
-         Promise fuer immer offen — der Podcast stand dann still.
-         Jetzt wird nach Ablauf zusaetzlich hart aufgeloest. */
-      const grenze = opts.timeout || 12000;
-      sicherung = setTimeout(() => {
-        if (settled) return;
-        try { r.stop(); } catch (_) {}
-        // Kurze Gnadenfrist fuer ein noch eintreffendes onend …
-        setTimeout(() => {
-          if (settled) return;
-          status('Zeitlimit erreicht.');
-          done(resolve, finalText.trim());   // ggf. leer -> Aufrufer behandelt das
-        }, 900);
-      }, grenze);
     });
   }
 
